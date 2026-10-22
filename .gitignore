@@ -1,0 +1,16 @@
+node_modules/
+dist/
+test/artifacts/
+screenshots/current-*.png
+ref/
+
+*.zip
+*.mp4
+*.webm
+*.mov
+*.glb
+*.fbx
+*.blend
+*.aep
+
+.DS_Store

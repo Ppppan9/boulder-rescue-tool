@@ -1,0 +1,25 @@
+{
+  "name": "boulder-rescue-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "巨石营救核玩工具：拆螺丝救出矿工，离线单文件、AE/3D/H5 导出",
+  "scripts": {
+    "build": "node build.mjs",
+    "test:logic": "node test/logic-test.mjs",
+    "test": "node test/run-test.mjs",
+    "test:ae": "node test/ae-export.mjs && node test/ae-mock.mjs && node test/ae-composite.mjs",
+    "test:3d": "bash test/export3d-blender.sh",
+    "test:h5": "node test/h5-export.mjs",
+    "test:cursor": "node test/cursor-test.mjs"
+  },
+  "devDependencies": {
+    "acorn": "^8.14.0",
+    "esbuild": "^0.25.0",
+    "playwright-core": "^1.49.1",
+    "three": "^0.170.0"
+  },
+  "dependencies": {
+    "@comfyorg/fbx-exporter-three": "^1.0.2"
+  }
+}

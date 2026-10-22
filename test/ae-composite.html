@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AE timeline composite / PSNR</title>
+<style>body{background:#111;color:#ddd;font:13px system-ui;margin:12px}canvas{border:1px solid #333;max-width:360px}</style>
+</head>
+<body>
+<h3>AE timeline composite / PSNR</h3>
+<div id="info">loading…</div>
+<canvas id="out" width="720" height="1280"></canvas>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  const project = '/' + (q.get('project') || 'test/artifacts/ae/project').replace(/^\/+/, '');
+  let TL = null;
+  const imgs = new Map();
+  const out = document.getElementById('out');
+  const g = out.getContext('2d', { willReadFrequently: true });
+  const info = (m) => { document.getElementById('info').textContent = m; };
+
+  async function loadImage(url) {
+    const im = new Image();
+    im.decoding = 'async';
+    await new Promise((res, rej) => { im.onload = res; im.onerror = () => rej(new Error('load ' + url)); im.src = url; });
+    return im;
+  }
+  function val(P, t, fallback) {
+    if (P == null) return fallback;
+    if (typeof P === 'number') return P;
+    if (Array.isArray(P)) return P;
+    if (!P.t || !P.t.length) return fallback;
+    if (P.t.length === 1) return P.v[0];
+    if (t <= P.t[0]) return P.v[0];
+    if (t >= P.t[P.t.length - 1]) return P.v[P.v.length - 1];
+    let lo = 0, hi = P.t.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (P.t[mid] <= t) lo = mid; else hi = mid; }
+    if (P.hold) return P.v[lo];
+    const u = (t - P.t[lo]) / (P.t[hi] - P.t[lo] || 1);
+    const a = P.v[lo], b = P.v[hi];
+    return Array.isArray(a) ? a.map((x, i) => x + (b[i] - x) * u) : a + (b - a) * u;
+  }
+  window.__init = async () => {
+    TL = await (await fetch(project + '/timeline.json', { cache: 'no-store' })).json();
+    const main = TL.comps.find(c => c.id === TL.mainComp);
+    const ids = [...new Set(main.layers.filter(l => l.src && l.src.asset).map(l => l.src.asset))];
+    const assets = new Map(TL.assets.filter(a => /\.png$/i.test(a.file)).map(a => [a.id, a]));
+    await Promise.all(ids.map(async id => {
+      const a = assets.get(id);
+      if (!a) return;
+      imgs.set(id, await loadImage(project + '/' + a.file));
+    }));
+    info('ready · ' + main.layers.length + ' layers · ' + imgs.size + ' images · ' + TL.meta.width + '×' + TL.meta.height);
+    return { layers: main.layers.length, images: imgs.size, duration: TL.meta.duration, fps: TL.meta.fps };
+  };
+  window.__render = (t, scale = 1) => {
+    const main = TL.comps.find(c => c.id === TL.mainComp);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, out.width, out.height);
+    for (const L of main.layers) {
+      if (!L.src || !L.src.asset || !L.tr) continue;
+      if (L.in != null && t < L.in - 1e-6) continue;
+      if (L.out != null && t > L.out + 1e-6) continue;
+      const a = TL.assets.find(x => x.id === L.src.asset);
+      const im = imgs.get(L.src.asset);
+      if (!a || !im) continue;
+      const pos = val(L.tr.position, t, [TL.meta.width / 2, TL.meta.height / 2]);
+      const sc = val(L.tr.scale, t, [100, 100]);
+      const rot = val(L.tr.rotation, t, 0);
+      const op = val(L.tr.opacity, t, 100);
+      if (!Array.isArray(pos) || !Array.isArray(sc) || op <= 0) continue;
+      const anch = L.tr.anchor || [a.w / 2, a.h / 2];
+      g.save();
+      g.translate(pos[0], pos[1]);
+      g.rotate((rot || 0) * Math.PI / 180);
+      g.scale((sc[0] || 0) / 100 * scale, (sc[1] || 0) / 100 * scale);
+      g.globalAlpha = Math.max(0, Math.min(1, op / 100));
+      g.drawImage(im, -anch[0], -anch[1], a.w, a.h);
+      g.restore();
+    }
+    g.globalAlpha = 1;
+    return out.toDataURL('image/png');
+  };
+  window.__psnr = async (aUrl, bUrl) => {
+    const [A, B] = await Promise.all([loadImage(aUrl), loadImage(bUrl)]);
+    const c1 = document.createElement('canvas'), c2 = document.createElement('canvas');
+    c1.width = c2.width = out.width; c1.height = c2.height = out.height;
+    const x1 = c1.getContext('2d', { willReadFrequently: true });
+    const x2 = c2.getContext('2d', { willReadFrequently: true });
+    x1.drawImage(A, 0, 0, c1.width, c1.height);
+    x2.drawImage(B, 0, 0, c2.width, c2.height);
+    const d1 = x1.getImageData(0, 0, c1.width, c1.height).data;
+    const d2 = x2.getImageData(0, 0, c2.width, c2.height).data;
+    let se = 0, ae = 0, n = 0, bad = 0;
+    for (let i = 0; i < d1.length; i += 4) {
+      for (let k = 0; k < 3; k++) {
+        const diff = d1[i + k] - d2[i + k];
+        se += diff * diff; ae += Math.abs(diff); n++;
+        if (Math.abs(diff) > 24) bad++;
+      }
+    }
+    const mse = se / n;
+    return { psnr: mse === 0 ? 99 : 10 * Math.log10(255 * 255 / mse), mse, mae: ae / n, badRatio: bad / n, pixels: n / 3 };
+  };
+  window.__ready = window.__init().catch(e => { info('ERROR ' + e.message); throw e; });
+})();
+</script>
+</body>
+</html>
