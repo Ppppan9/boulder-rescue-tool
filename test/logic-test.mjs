@@ -66,7 +66,7 @@ const lostPlan = solvePlan(L, { ...initState(L), lost: true });
 check(Array.isArray(lostPlan) && lostPlan.length === 0, '已失败局面返回空计划');
 
 stage('随机关卡：保证可解');
-for (const colorCount of [3, 4, 5]) {
+for (const colorCount of [3, 4, 5, 6]) {
   for (const [cols, rows] of [[4, 3], [5, 5], [6, 4], [7, 6], [8, 8]]) {
     for (let seed = 1; seed <= 8; seed++) {
       const R = makeLevel({ cols, rows, colorCount, seed: seed * 137 });
@@ -144,7 +144,7 @@ stage('设置结构 / 迁移');
 const groupNames = GROUPS.map(g => g[0]);
 eq(groupNames.slice(0, 3).join('|'), '关卡与棋盘|节奏与提示|美术与场景', '前三组顺序符合标准');
 eq(groupNames.slice(3).join('|'), '音效|手指 / 自动通关|录制|导出 AE 工程|导出 3D 动画（UE5 / C4D / Blender）|导出 H5 试玩广告|结束页(End Card)', '后续面板组顺序符合标准');
-eq(DEFS.colorCount, 4, '默认 4 色');
+eq(DEFS.colorCount, 6, '默认 6 色');
 eq(DEFS.traySlots, 3, '默认 3 槽');
 eq(DEFS.handShow, true, '默认显示手指');
 eq(DEFS.manualHand, true, '默认手动跟随');
@@ -156,7 +156,12 @@ eq(DEFS.aeNames, 'zh', '默认中文图层命名');
 eq(DEFS.h5AutoPlay, false, 'H5 默认不自动播放');
 eq(APP_ID, 'boulder-rescue-tool', 'APP_ID');
 eq(STORE_KEY, 'boulderRescueTool.settings', 'localStorage key');
-eq(SETTINGS_VERSION, 1, '设置版本 1');
+eq(SETTINGS_VERSION, 2, '设置版本 2');
+eq(DEFS.timeLimit, 22, '默认 22 秒');
+eq(DEFS.matchBonus, 0, '默认不加时');
+eq(DEFS.captionText, '清华北大的也过不去', '默认参考字幕');
+eq(DEFS.handStyle, 'glove', '默认白手套');
+eq(DEFS.sceneStyle, 'quarry', '默认蓝石矿坑');
 const legacy = migrate({ version: 0, handImg: 'x.png', sfxVol: 0.3, endText: '旧标题', gameTime: 123, colorCount: 5 });
 eq(legacy.handImage, 'x.png', '迁移 handImg → handImage');
 eq(legacy.sfxVolume, 0.3, '迁移 sfxVol → sfxVolume');
@@ -174,6 +179,6 @@ const exp = JSON.parse(exportJSON({ ...DEFS, colorCount: 3 }));
 eq(exp.app, APP_ID, '导出设置带 app');
 eq(exp.version, SETTINGS_VERSION, '导出设置带 version');
 eq(exp.settings.colorCount, 3, '导出设置带 settings');
-check(COLORS.length === 5, '调色板 5 色定义完整');
+check(COLORS.length === 6, '调色板 6 色定义完整');
 
 summary('逻辑测试');

@@ -3,6 +3,9 @@
 // 也用于 AE 时间轴逐元素记录与 3D 导出，保证三者结构一致。
 import { COLOR_HEX, COLOR_DARK, COLOR_LIGHT } from './level.js';
 
+let endCatImg = null;
+export function setEndCatImage(img) { endCatImg = img; }
+
 export const DW = 720, DH = 1280;
 export const TAU = Math.PI * 2;
 
@@ -18,6 +21,52 @@ export const LAYOUT = {
   acid: { x: 118, top: 728 },
   caption: { x: 318, y: 56 },
 };
+
+// 参考视频有两幕：蓝石矿坑（人质壁龛 + 木梁陷阱）与酸池地牢（绳索 + 酸池）。
+// 两幕共用同一套 42 颗螺丝规则，只切换舞台布局与背景；随机/图形关可任选一幕。
+export const SCENES = {
+  quarry: {
+    key: 'quarry', label: '蓝石矿坑', noTimer: false, hasAcid: false, hasRope: false, hasNiche: true,
+    layout: {
+      board: { left: 18, top: 710, w: 684, h: 532, x0: 58, x1: 680, y0: 744, y1: 1212 },
+      tray: { x: 520, y: 660, w: 300, h: 88 },
+      platform: { x: 566, y: 585, w: 344, h: 64 },
+      hero: { x: 566, foot: 590, hip: 518, head: 404, shoulder: 446 },
+      pulley: { x: 220, y: 420 },
+      weight: { x: 120, y: 780 },
+      slab: { x: 434, y: 264 },
+      timer: { x: 640, y: 350 },
+      acid: { x: 120, top: 0 },
+    },
+  },
+  acid: {
+    key: 'acid', label: '酸池地牢', noTimer: true, hasAcid: true, hasRope: true, hasNiche: false,
+    layout: {
+      board: { left: 230, top: 656, w: 472, h: 586, x0: 272, x1: 668, y0: 692, y1: 1204 },
+      tray: { x: 500, y: 598, w: 300, h: 88 },
+      platform: { x: 550, y: 544, w: 372, h: 66 },
+      hero: { x: 556, foot: 544, hip: 474, head: 362, shoulder: 404 },
+      pulley: { x: 208, y: 444 },
+      weight: { x: 120, y: 780 },
+      slab: { x: 430, y: 180 },
+      timer: { x: 640, y: 470 },
+      acid: { x: 120, top: 720 },
+    },
+  },
+};
+
+export function sceneKey(S) {
+  if (!S) return 'quarry';
+  if (S.level === 'reference_acid') return 'acid';
+  if (S.level === 'random' || S.level === 'image') return S.sceneStyle === 'acid' ? 'acid' : 'quarry';
+  return 'quarry';
+}
+export function sceneSpec(S) { return SCENES[sceneKey(S)]; }
+export function applyScene(S) {
+  const sp = sceneSpec(S);
+  for (const k of Object.keys(sp.layout)) Object.assign(LAYOUT[k], sp.layout[k]);
+  return sp;
+}
 
 export function boardGeom(L) {
   const B = { ...LAYOUT.board };
@@ -98,6 +147,20 @@ function drawSpaced(g, text, x, y, spacing = 2) {
   let cx = x - total / 2;
   g.textAlign = 'left';
   chars.forEach((c, i) => { g.fillText(c, cx, y); g.strokeText(c, cx, y); cx += widths[i] + spacing; });
+  return total;
+}
+function drawOutlinedText(g, text, x, y, font, fill, stroke, lw, spacing = 2) {
+  g.font = font; g.textAlign = 'left'; g.textBaseline = 'middle';
+  const chars = [...text];
+  const widths = chars.map(c => g.measureText(c).width);
+  const total = widths.reduce((s, w) => s + w, 0) + spacing * (chars.length - 1);
+  let cx = x - total / 2;
+  g.lineJoin = 'round'; g.lineWidth = lw; g.strokeStyle = stroke;
+  for (let i = 0; i < chars.length; i++) {
+    g.strokeText(chars[i], cx, y);
+    g.fillStyle = fill; g.fillText(chars[i], cx, y);
+    cx += widths[i] + spacing;
+  }
   return total;
 }
 function mk(w, h, fn) {
@@ -209,149 +272,206 @@ function drawWood(g, x, y, w, h, col, dk, seed = 1, vertical = false) {
 }
 
 // ---------- 背景 ----------
-function buildBackground(S, seed = 11) {
+// 参考视频第一幕：蓝石矿坑。上半屏是被蓝灰色卵石填满的矿坑，右侧挖出一个人质壁龛，
+// 木梁从上方斜压下来；下方是 7×6 螺丝木板。第二幕：酸池地牢，砖墙 + 左侧绿酸池 + 石台。
+function drawStoneFrame(g, S, R) {
+  const base = S.brickColor, dk = S.brickDark;
+  // 外圈深色石框
+  const frame = g.createLinearGradient(0, 0, 0, DH);
+  frame.addColorStop(0, '#423033'); frame.addColorStop(.5, '#251a1e'); frame.addColorStop(1, '#160f13');
+  g.fillStyle = frame; g.fillRect(0, 0, DW, DH);
+  for (const [x, w] of [[0, 26], [DW - 26, 26]]) {
+    const pg = g.createLinearGradient(x, 0, x + w, 0);
+    pg.addColorStop(0, '#594144'); pg.addColorStop(.45, '#332326'); pg.addColorStop(1, '#1a1013');
+    g.fillStyle = pg; g.fillRect(x, 0, w, DH);
+    for (let y = 18; y < DH; y += 54) {
+      g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + 1, y); g.lineTo(x + w - 1, y); g.stroke();
+      g.strokeStyle = 'rgba(190,170,170,.12)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + 3, y + 2); g.lineTo(x + w - 3, y + 2); g.stroke();
+    }
+  }
+  // 顶部压顶 + 蓝灰金属线
+  const top = g.createLinearGradient(0, 0, 0, 34);
+  top.addColorStop(0, '#6d5658'); top.addColorStop(1, '#2a1d21');
+  g.fillStyle = top; g.fillRect(0, 0, DW, 30);
+  g.fillStyle = 'rgba(155,184,206,.5)'; g.fillRect(20, 30, DW - 40, 4);
+  g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(20, 34, DW - 40, 7);
+}
+
+function drawBlueRockField(g, S, R, x0, y0, w, h, count, radius = 22, skip = null) {
+  const rockBase = S.rockColor || '#516f9e';
+  g.save(); g.beginPath(); g.rect(x0, y0, w, h); g.clip();
+  const bg = g.createLinearGradient(x0, y0, x0 + w, y0 + h);
+  bg.addColorStop(0, dark(rockBase, .38)); bg.addColorStop(.45, dark(rockBase, .06)); bg.addColorStop(1, dark(rockBase, .46));
+  g.fillStyle = bg; g.fillRect(x0, y0, w, h);
+  for (let i = 0; i < count; i++) {
+    const x = x0 - 20 + R() * (w + 40), y = y0 - 20 + R() * (h + 40);
+    if (skip && skip(x, y)) continue;
+    const rr2 = radius * (.55 + R() * .85);
+    const col = R() < .28 ? S.rockLight : R() < .18 ? dark(rockBase, .34) : rockBase;
+    drawRock(g, x, y, rr2, col, 1000 + i * 19);
+  }
+  g.restore();
+}
+
+function buildQuarryBackground(S, seed = 11) {
   return mk(DW, DH, (g) => {
     const R = rng(seed);
-    const base = S.brickColor, dk = S.brickDark;
-    const grd = g.createLinearGradient(0, 0, 0, DH);
-    grd.addColorStop(0, dark(base, 0.5)); grd.addColorStop(0.45, dark(base, 0.22)); grd.addColorStop(1, dark(dk, 0.45));
-    g.fillStyle = grd; g.fillRect(0, 0, DW, DH);
-    drawBrickWall(g, -20, -20, DW + 40, DH + 40, base, dk, 21, { bh: 33, bw: 82, gap: 4 });
-    // 两侧粗石壁柱
-    for (const [x, w] of [[0, 42], [DW - 38, 42]]) {
-      const pg = g.createLinearGradient(x, 0, x + w, 0);
-      pg.addColorStop(0, dark(base, 0.5)); pg.addColorStop(.5, dark(base, 0.18)); pg.addColorStop(1, dark(dk, 0.55));
-      g.fillStyle = pg; g.fillRect(x, 0, w, DH);
-      for (let y = 20; y < DH; y += 58) {
-        g.strokeStyle = rgba(dark(dk, .5), .6); g.lineWidth = 2; g.beginPath(); g.moveTo(x + 2, y); g.lineTo(x + w - 2, y); g.stroke();
-      }
-      g.strokeStyle = rgba(light(base, .2), .16); g.lineWidth = 3; g.beginPath(); g.moveTo(x + 5, 0); g.lineTo(x + 5, DH); g.stroke();
-    }
-    // 顶部横梁
-    const beamY = 24, beamH = 60;
-    drawWood(g, 26, beamY, DW - 76, beamH, S.woodColor, S.woodDark, 31);
-    g.fillStyle = rgba('#000000', .28); g.fillRect(26, beamY + beamH - 6, DW - 76, 10);
-    for (const bx of [62, 172, 548, 646]) {
-      rr(g, bx - 9, beamY + 6, 18, beamH - 12, 5); g.fillStyle = dark(S.metalColor, .55); g.fill();
-      g.strokeStyle = rgba('#000000', .4); g.lineWidth = 2; g.stroke();
-      g.beginPath(); g.arc(bx, beamY + beamH / 2, 4, 0, TAU); g.fillStyle = rgba('#ffffff', .25); g.fill();
-    }
-    // 上方洞口与阴影
-    const cave = g.createLinearGradient(0, 70, 0, 560);
-    cave.addColorStop(0, 'rgba(9,6,10,.05)'); cave.addColorStop(.45, 'rgba(9,6,10,.28)'); cave.addColorStop(1, 'rgba(7,5,9,.62)');
-    g.fillStyle = cave; g.fillRect(40, 78, DW - 80, 500);
-    // 洞口拱形石框
+    drawStoneFrame(g, S, R);
+    // 上半屏蓝石堆
+    drawBlueRockField(g, S, R, 20, 40, DW - 40, 660, 900, 24, (x, y) => {
+      if (x > 412 && x < 714 && y > 246 && y < 610) return true;   // 人质壁龛
+      if (x > 330 && y > 586 && x < 714 && y < 704) return true;   // 托盘石座
+      return false;
+    });
+    // 左侧更深处的碎石
+    drawBlueRockField(g, S, R, 20, 660, 350, 80, 130, 16);
+    // 人质壁龛：深色砖洞 + 粗石拱框
+    const nx = 432, ny = 300, nw = 272, nh = 300, ar = 82;
     g.save();
-    g.strokeStyle = rgba(dark(base, .6), .95); g.lineWidth = 24;
-    g.beginPath(); g.moveTo(80, 585); g.lineTo(80, 260); g.quadraticCurveTo(80, 120, 260, 118); g.lineTo(560, 118); g.quadraticCurveTo(680, 120, 690, 250); g.stroke();
-    g.strokeStyle = rgba(light(base, .12), .28); g.lineWidth = 4;
-    g.beginPath(); g.moveTo(92, 560); g.lineTo(92, 265); g.quadraticCurveTo(94, 134, 260, 132); g.stroke();
+    g.beginPath(); g.moveTo(nx, ny + nh); g.lineTo(nx, ny + ar);
+    g.quadraticCurveTo(nx, ny, nx + ar, ny); g.lineTo(nx + nw - ar, ny);
+    g.quadraticCurveTo(nx + nw, ny, nx + nw, ny + ar); g.lineTo(nx + nw, ny + nh); g.closePath();
+    const cave = g.createLinearGradient(0, ny, 0, ny + nh);
+    cave.addColorStop(0, '#533234'); cave.addColorStop(.5, '#392124'); cave.addColorStop(1, '#241417');
+    g.fillStyle = cave; g.fill();
+    g.clip(); drawBrickWall(g, nx, ny, nw, nh, S.brickColor, '#1a1012', 77, { bh: 26, bw: 66, gap: 4 });
+    g.fillStyle = 'rgba(0,0,0,.2)'; g.fillRect(nx, ny, nw, nh);
     g.restore();
-    // 左上方巨石堆
-    drawBoulderPile(g, S, 71);
-    // 矿洞深处大洞（棋盘后面）
-    const hole = g.createRadialGradient(500, 860, 30, 480, 900, 440);
-    hole.addColorStop(0, '#120b12'); hole.addColorStop(.7, '#09070b'); hole.addColorStop(1, '#150d14');
-    g.fillStyle = hole; rr(g, 214, 552, 506, 728, 34); g.fill();
-    // 洞内砖纹
-    g.save(); rr(g, 220, 558, 494, 716, 30); g.clip(); drawBrickWall(g, 214, 552, 512, 728, dark(base, .35), '#120b12', 33, { bh: 28, bw: 64, gap: 6 }); g.globalAlpha = .6; g.fillStyle = '#0b070c'; g.fillRect(214, 552, 512, 728); g.restore();
-    // 左侧竖链
-    g.save(); g.strokeStyle = rgba(dark(S.metalColor, .35), .65); g.lineWidth = 4;
-    for (let y = 96; y < 400; y += 22) { g.beginPath(); g.ellipse(30, y, 6, 11, 0, 0, TAU); g.stroke(); }
-    for (let y = 120; y < 330; y += 26) { g.beginPath(); g.ellipse(694, y, 5, 10, 0, 0, TAU); g.stroke(); }
+    g.beginPath(); g.moveTo(nx, ny + nh); g.lineTo(nx, ny + ar);
+    g.quadraticCurveTo(nx, ny, nx + ar, ny); g.lineTo(nx + nw - ar, ny);
+    g.quadraticCurveTo(nx + nw, ny, nx + nw, ny + ar); g.lineTo(nx + nw, ny + nh);
+    g.strokeStyle = '#574045'; g.lineWidth = 24; g.stroke();
+    g.strokeStyle = 'rgba(150,135,140,.3)'; g.lineWidth = 4; g.stroke();
+    // 拱框石块
+    for (let i = 0; i < 12; i++) {
+      const a = Math.PI * (1 + i / 12), x = nx + nw / 2 + Math.cos(a) * (nw / 2 + 3), y = ny + ar + Math.sin(a) * ar;
+      g.save(); g.translate(x, y); g.rotate(a + Math.PI / 2); g.fillStyle = i % 2 ? '#5c4549' : '#4b373b';
+      rr(g, -22, -10, 44, 20, 4); g.fill(); g.strokeStyle = 'rgba(20,12,14,.55)'; g.lineWidth = 2; g.stroke(); g.restore();
+    }
+    // 壁龛石台
+    g.fillStyle = 'rgba(0,0,0,.35)'; rr(g, 410, 595, 322, 32, 9); g.fill();
+    const sill = g.createLinearGradient(0, 595, 0, 628);
+    sill.addColorStop(0, '#7b6264'); sill.addColorStop(1, '#3b2a2d');
+    rr(g, 408, 592, 326, 30, 9); fillStroke(g, sill, '#241719', 3);
+    // 托盘石座
+    g.fillStyle = '#302124'; rr(g, 355, 588, 348, 114, 18); g.fill();
+    g.strokeStyle = '#594246'; g.lineWidth = 5; g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 3; rr(g, 362, 596, 334, 98, 14); g.stroke();
+    // 木梁陷阱（从左上斜压向壁龛）
+    g.save(); g.translate(470, 236); g.rotate(-.17);
+    drawWood(g, -228, -28, 462, 56, S.woodColor, S.woodDark, 311);
+    for (const x of [-214, 200]) {
+      g.fillStyle = '#76615a'; rr(g, x - 14, -24, 28, 48, 4); g.fill(); g.strokeStyle = '#241619'; g.lineWidth = 2; g.stroke();
+    }
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-228, 18, 462, 10);
     g.restore();
-    // 右上方光束
-    const beam = g.createLinearGradient(640, 0, 320, 780);
-    beam.addColorStop(0, 'rgba(140,255,220,.13)'); beam.addColorStop(.5, 'rgba(120,220,210,.03)'); beam.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = beam; g.beginPath(); g.moveTo(560, 106); g.lineTo(700, 106); g.lineTo(430, 760); g.lineTo(300, 760); g.closePath(); g.fill();
-    // 青苔与污渍
-    for (let i = 0; i < 26; i++) {
-      const x = 40 + R() * 620, y = 300 + R() * 900, r = 5 + R() * 20;
-      g.fillStyle = `rgba(${58 + R() * 40 | 0},${100 + R() * 50 | 0},${60 + R() * 30 | 0},${.05 + R() * .1})`;
-      g.beginPath(); g.ellipse(x, y, r, r * .55, R() * 3, 0, TAU); g.fill();
-    }
-    // 整体光/暗角
-    const topGlow = g.createLinearGradient(0, 0, 0, 420);
-    topGlow.addColorStop(0, 'rgba(255,190,90,.06)'); topGlow.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = topGlow; g.fillRect(0, 0, DW, 420);
-    // 噪点
-    const n = Math.round(2600 * S.bgGrain);
-    for (let i = 0; i < n; i++) {
-      const a = R() * .06;
-      g.fillStyle = R() < .5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`;
-      g.fillRect(R() * DW, R() * DH, 1 + (R() < .15 ? 1 : 0), 1);
-    }
-    const vg = g.createRadialGradient(DW / 2, DH * .44, DH * .2, DW / 2, DH * .5, DH * .72);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(0,0,0,${.62 * S.vignette})`);
+    // 边缘暗角与噪点
+    const vg = g.createRadialGradient(DW / 2, 440, 160, DW / 2, 600, 760);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(0,0,0,${.55 * S.vignette})`);
     g.fillStyle = vg; g.fillRect(0, 0, DW, DH);
+    for (let i = 0; i < 2200 * S.bgGrain; i++) {
+      g.fillStyle = R() < .5 ? `rgba(255,255,255,${R() * .05})` : `rgba(0,0,0,${R() * .06})`;
+      g.fillRect(R() * DW, R() * DH, 1.4, 1.4);
+    }
   });
 }
 
+function buildAcidBackground(S, seed = 24) {
+  return mk(DW, DH, (g) => {
+    const R = rng(seed);
+    drawStoneFrame(g, S, R);
+    const base = S.brickColor, dk = S.brickDark;
+    const bg = g.createLinearGradient(0, 0, 0, DH);
+    bg.addColorStop(0, '#7d4c49'); bg.addColorStop(.32, '#5c3739'); bg.addColorStop(1, '#2c1b1e');
+    g.fillStyle = bg; g.fillRect(20, 34, DW - 40, DH - 34);
+    drawBrickWall(g, 20, 34, DW - 40, DH - 34, base, dk, 43, { bh: 33, bw: 84, gap: 5 });
+    g.fillStyle = 'rgba(10,6,8,.08)'; g.fillRect(20, 34, DW - 40, DH - 34);
+    // 左侧酸池石框
+    g.fillStyle = '#2b1a1d'; rr(g, 18, 930, 236, 370, 18); g.fill();
+    g.strokeStyle = '#5c4348'; g.lineWidth = 6; g.stroke();
+    const acidGlow = g.createLinearGradient(0, 900, 0, 1280);
+    acidGlow.addColorStop(0, 'rgba(125,240,55,.18)'); acidGlow.addColorStop(1, 'rgba(80,180,20,.05)');
+    g.fillStyle = acidGlow; g.fillRect(30, 950, 212, 310);
+    // 左中部蓝色碎石矿堆
+    drawBlueRockField(g, S, R, 20, 610, 240, 380, 230, 17, (x, y) => y > 900 && x < 260);
+    // 上方石台阴影
+    g.fillStyle = 'rgba(0,0,0,.24)'; g.fillRect(20, 34, DW - 40, 120);
+    // 石台立面（平台 asset 之上仍保留砖纹）
+    g.save(); g.beginPath(); g.rect(170, 500, 530, 160); g.clip(); drawBrickWall(g, 170, 500, 530, 160, dark(base, .12), dk, 71, { bh: 25, bw: 72, gap: 4 }); g.fillStyle = 'rgba(0,0,0,.32)'; g.fillRect(170, 500, 530, 160); g.restore();
+    // 绳索滑轮支架
+    g.save(); g.translate(208, 410);
+    g.strokeStyle = '#3c2c1e'; g.lineWidth = 9; g.beginPath(); g.moveTo(0, 0); g.lineTo(-14, 110); g.stroke();
+    g.fillStyle = '#70645d'; rr(g, -26, -8, 52, 16, 4); g.fill(); g.strokeStyle = '#241719'; g.lineWidth = 2; g.stroke();
+    g.restore();
+    // 几块从上方崩落的蓝石
+    for (const [x, y, r] of [[220, 240, 15], [258, 300, 9], [148, 330, 11], [620, 158, 12]]) drawRock(g, x, y, r, S.rockColor, x * 3 + y);
+    // 顶部和底部压暗
+    const top = g.createLinearGradient(0, 0, 0, 260);
+    top.addColorStop(0, 'rgba(10,6,8,.32)'); top.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = top; g.fillRect(0, 30, DW, 230);
+    const vg = g.createRadialGradient(DW / 2, 520, 140, DW / 2, 700, 760);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(0,0,0,${.26 * S.vignette})`);
+    g.fillStyle = vg; g.fillRect(0, 0, DW, DH);
+    for (let i = 0; i < 1800 * S.bgGrain; i++) {
+      g.fillStyle = R() < .5 ? `rgba(255,255,255,${R() * .04})` : `rgba(0,0,0,${R() * .06})`;
+      g.fillRect(R() * DW, R() * DH, 1.4, 1.4);
+    }
+  });
+}
+
+function buildBackground(S, seed = 11) {
+  return sceneSpec(S).key === 'acid' ? buildAcidBackground(S, seed) : buildQuarryBackground(S, seed);
+}
+
 // ---------- 棋盘底板 ----------
+// 参考视频的棋盘不是“黑窟窿”，而是木板格架直接钉在砖墙/蓝石堆上；螺丝拔出后只留小孔。
 function buildBoard(S, L, seed = 51) {
   const B = boardGeom(L);
+  const sp = sceneSpec(S);
   return mk(B.w, B.h, (g, W, H) => {
     const R = rng(seed);
     const ox = B.left, oy = B.top;
-    // 外框：暖砖 + 圆角石座
-    g.fillStyle = 'rgba(0,0,0,.5)'; rr(g, 4, 12, W - 4, H - 6, 36); g.fill();
-    const frame = g.createLinearGradient(0, 0, W, H);
-    frame.addColorStop(0, light(S.brickColor, .1)); frame.addColorStop(.45, S.brickColor); frame.addColorStop(1, dark(S.brickDark, .2));
-    rr(g, 0, 0, W, H, 34); fillStroke(g, frame, dark(S.brickDark, .55), 5);
-    g.save(); rr(g, 2, 2, W - 4, H - 4, 32); g.clip();
-    drawBrickWall(g, 0, 0, W, H, S.brickColor, S.brickDark, 53, { bh: 31, bw: 72, gap: 5 });
-    g.fillStyle = 'rgba(12,6,10,.48)'; g.fillRect(0, 0, W, H);
-    g.restore();
-    // 内腔：深蓝碎石堆（参考视频最醒目的底层质感）
-    rr(g, 15, 15, W - 30, H - 30, 26); g.fillStyle = '#0a1016'; g.fill();
-    g.save(); rr(g, 16, 16, W - 32, H - 32, 25); g.clip();
-    const backs = g.createLinearGradient(0, 0, 0, H);
-    backs.addColorStop(0, '#0d1a22'); backs.addColorStop(.4, '#0a151c'); backs.addColorStop(1, '#060b10');
-    g.fillStyle = backs; g.fillRect(0, 0, W, H);
-    // 三层碎石：暗 → 中 → 亮，营造密集矿堆
-    for (let layer = 0; layer < 3; layer++) {
-      const count = layer === 0 ? 130 : layer === 1 ? 105 : 70;
-      for (let i = 0; i < count; i++) {
-        const x = -14 + R() * (W + 28), y = -10 + R() * (H + 20);
-        const r = (layer === 0 ? 20 : layer === 1 ? 15 : 10) + R() * (layer === 0 ? 26 : layer === 1 ? 18 : 12);
-        const col = layer === 0 ? dark(S.rockColor, .32) : layer === 1 ? S.rockColor : (R() < .55 ? S.rockLight : mix(S.rockColor, S.rockLight, .55));
-        drawRock(g, x, y, r, col, 3000 + layer * 977 + i * 13);
-      }
-    }
-    // 压暗四周，中心略亮
-    const shade = g.createRadialGradient(W * .5, H * .45, 40, W * .5, H * .55, W * .78);
-    shade.addColorStop(0, 'rgba(5,10,14,.06)'); shade.addColorStop(.62, 'rgba(4,7,10,.38)'); shade.addColorStop(1, 'rgba(3,5,8,.86)');
+    g.fillStyle = '#1a1114'; g.fillRect(0, 0, W, H);
+    // 砖墙底
+    drawBrickWall(g, 0, 0, W, H, mix(S.brickColor, '#4b2a2a', .2), S.brickDark, 53, { bh: 29, bw: 66, gap: 4 });
+    const shade = g.createLinearGradient(0, 0, 0, H);
+    shade.addColorStop(0, 'rgba(0,0,0,.14)'); shade.addColorStop(.35, 'rgba(0,0,0,.03)'); shade.addColorStop(1, 'rgba(0,0,0,.26)');
     g.fillStyle = shade; g.fillRect(0, 0, W, H);
-    // 冷色矿光
-    const glow = g.createRadialGradient(W * .42, H * .42, 10, W * .42, H * .5, W * .62);
-    glow.addColorStop(0, 'rgba(95,190,195,.15)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = glow; g.fillRect(0, 0, W, H);
-    g.restore();
-    // 内框压边
-    rr(g, 15, 15, W - 30, H - 30, 26); g.strokeStyle = rgba(dark(S.brickDark, .7), .95); g.lineWidth = 7; g.stroke();
-    rr(g, 23, 23, W - 46, H - 46, 20); g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = 3; g.stroke();
-    rr(g, 6, 6, W - 12, H - 12, 30); g.strokeStyle = rgba(light(S.brickColor, .26), .32); g.lineWidth = 3; g.stroke();
-
-    // 每个节点的木孔（螺丝拔出后露出的洞）
+    if (sp.key === 'acid') {
+      // 第二幕：棋盘上半部是蓝石堆，底部露出砖墙
+      drawBlueRockField(g, S, R, 0, 0, W, H * .62, 290, 15);
+      const fade = g.createLinearGradient(0, H * .34, 0, H * .72);
+      fade.addColorStop(0, 'rgba(15,10,13,0)'); fade.addColorStop(1, 'rgba(15,10,13,.48)');
+      g.fillStyle = fade; g.fillRect(0, H * .34, W, H * .4);
+    } else {
+      // 第一幕：左侧蓝石堆从矿坑里漫到棋盘上
+      g.save(); g.beginPath(); g.moveTo(0, 0); g.lineTo(W * .46, 0); g.quadraticCurveTo(W * .22, H * .46, W * .32, H); g.lineTo(0, H); g.closePath(); g.clip();
+      drawBlueRockField(g, S, R, -10, 0, W * .62, H, 380, 15);
+      // 蓝石边缘压暗
+      const edge = g.createLinearGradient(W * .08, 0, W * .46, 0);
+      edge.addColorStop(0, 'rgba(15,10,13,.55)'); edge.addColorStop(.7, 'rgba(15,10,13,.05)'); edge.addColorStop(1, 'rgba(15,10,13,.6)');
+      g.fillStyle = edge; g.fillRect(0, 0, W * .62, H); g.restore();
+    }
+    // 螺丝小孔：螺钉盖住时看不见，拔出后露出小孔
     for (const n of L.nodes) {
       const p = B.node(n.c, n.r), x = p.x - ox, y = p.y - oy;
-      g.beginPath(); g.arc(x, y + 3, 27, 0, TAU); g.fillStyle = 'rgba(0,0,0,.5)'; g.fill();
-      const hole = g.createRadialGradient(x - 6, y - 6, 3, x, y, 26);
-      hole.addColorStop(0, '#090407'); hole.addColorStop(.6, '#150c10'); hole.addColorStop(1, '#33211d');
-      g.beginPath(); g.arc(x, y, 23, 0, TAU); g.fillStyle = hole; g.fill();
-      g.strokeStyle = 'rgba(14,8,7,.9)'; g.lineWidth = 3; g.stroke();
-      g.strokeStyle = 'rgba(215,166,110,.22)'; g.lineWidth = 1.6; g.beginPath(); g.arc(x - 1, y - 1, 20, Math.PI * 1.05, Math.PI * 1.72); g.stroke();
+      g.beginPath(); g.arc(x, y + 1.5, 18, 0, TAU); g.fillStyle = 'rgba(0,0,0,.45)'; g.fill();
+      const hole = g.createRadialGradient(x - 4, y - 5, 2, x, y, 18);
+      hole.addColorStop(0, '#0c0809'); hole.addColorStop(.62, '#1a0f12'); hole.addColorStop(1, '#3b2626');
+      g.beginPath(); g.arc(x, y, 16.5, 0, TAU); g.fillStyle = hole; g.fill();
+      g.strokeStyle = 'rgba(12,7,8,.9)'; g.lineWidth = 2; g.stroke();
+      g.strokeStyle = 'rgba(214,172,116,.2)'; g.lineWidth = 1.4; g.beginPath(); g.arc(x - 1, y - 1, 14, Math.PI * 1.05, Math.PI * 1.7); g.stroke();
     }
-    // 底部危险条纹 + 铭牌
-    g.save(); g.beginPath(); g.rect(38, H - 48, W - 76, 18); g.clip();
-    for (let x = -20; x < W; x += 24) { g.fillStyle = x % 48 ? rgba(S.glowColor, .38) : 'rgba(0,0,0,.55)'; g.save(); g.translate(x, H - 48); g.rotate(-.55); g.fillRect(0, -12, 12, 46); g.restore(); }
-    g.restore();
-    rr(g, W / 2 - 62, H - 42, 124, 20, 9); g.fillStyle = dark(S.metalColor, .62); g.fill(); g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 1.5; g.stroke();
-    g.fillStyle = rgba(light(S.metalColor, .5), .45); g.font = '700 10px "PingFang SC","Microsoft YaHei",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('B O U L D E R   R E S C U E', W / 2, H - 32);
-    // 左上角巨石压境的阴影
-    const sh = g.createLinearGradient(0, 0, 100, 280);
-    sh.addColorStop(0, 'rgba(0,0,0,.55)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = sh; g.fillRect(0, 0, 150, 320);
+    // 四周压边
+    const rim = g.createLinearGradient(0, 0, 0, 20);
+    rim.addColorStop(0, 'rgba(0,0,0,.55)'); rim.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rim; g.fillRect(0, 0, W, 24);
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, H - 18, W, 18);
+    // 细碎噪点
+    for (let i = 0; i < 500; i++) {
+      g.fillStyle = R() < .5 ? 'rgba(255,255,255,.03)' : 'rgba(0,0,0,.05)';
+      g.fillRect(R() * W, R() * H, 1.2, 1.2);
+    }
   });
 }
 
@@ -359,147 +479,109 @@ function buildBoard(S, L, seed = 51) {
 function buildPlank(S, B, dir, variant = 0) {
   const pw = Math.round(S.plankW);
   if (dir === 'h') {
-    const L2 = Math.round(B.dx + 18);
+    const L2 = Math.round(B.dx + 28);
     return mk(L2 + 14, pw + 18, (g, W, H) => {
-      g.fillStyle = 'rgba(0,0,0,.35)'; rr(g, 7, 11, W - 14, H - 14, 7); g.fill();
+      g.fillStyle = 'rgba(0,0,0,.32)'; rr(g, 7, 11, W - 14, H - 14, 7); g.fill();
       drawWood(g, 7, 7, W - 14, pw, S.woodColor, S.woodDark, 600 + variant * 7, false);
-      const y = 7 + pw / 2;
-      for (const x of [16, W - 16]) {
-        g.beginPath(); g.arc(x, y, 4.4, 0, TAU); g.fillStyle = 'rgba(18,10,7,.8)'; g.fill();
-        g.beginPath(); g.arc(x - 1, y - 1, 2.6, 0, TAU); g.fillStyle = rgba(S.metalColor, .4); g.fill();
-      }
+      // 两端深色端面，参考视频的木梁没有金属铆钉
+      g.fillStyle = 'rgba(43,24,13,.45)'; rr(g, 8, 8, 6, pw, 3); g.fill(); rr(g, W - 14, 8, 6, pw, 3); g.fill();
     });
   }
-  const L2 = Math.round(B.dy + 18);
+  const L2 = Math.round(B.dy + 28);
   return mk(pw + 18, L2 + 14, (g, W, H) => {
-    g.fillStyle = 'rgba(0,0,0,.35)'; rr(g, 9, 7, W - 14, H - 14, 7); g.fill();
+    g.fillStyle = 'rgba(0,0,0,.32)'; rr(g, 9, 7, W - 14, H - 14, 7); g.fill();
     drawWood(g, 7, 7, pw, H - 14, S.woodColor, S.woodDark, 620 + variant * 7, true);
-    const x = 7 + pw / 2;
-    for (const y of [16, H - 16]) {
-      g.beginPath(); g.arc(x, y, 4.4, 0, TAU); g.fillStyle = 'rgba(18,10,7,.8)'; g.fill();
-      g.beginPath(); g.arc(x - 1, y - 1, 2.6, 0, TAU); g.fillStyle = rgba(S.metalColor, .4); g.fill();
-    }
+    g.fillStyle = 'rgba(43,24,13,.45)'; rr(g, 8, 8, pw, 6, 3); g.fill(); rr(g, 8, H - 14, pw, 6, 3); g.fill();
   });
 }
 
 // ---------- 螺丝 ----------
-// 参考视频中的螺丝是「深色木孔 + 彩色十字凸台」：外圈是坑洞，中心是被拧亮的十字螺栓。
+// 参考视频的螺丝是明快的彩色十字凸台，直接压在本板上；没有大黑洞与金属内六角。
 function buildScrew(color) {
-  const base = COLOR_HEX[color], dk = COLOR_DARK[color], lt = COLOR_LIGHT[color];
-  return mk(74, 74, (g, W, H) => {
+  const base = COLOR_HEX[color] || '#ff4d4d', dk = COLOR_DARK[color] || '#7a1d1d', lt = COLOR_LIGHT[color] || '#ffb0b0';
+  return mk(70, 70, (g, W, H) => {
     const cx = W / 2, cy = H / 2;
-    // 木孔投影
-    g.fillStyle = 'rgba(0,0,0,.45)'; g.beginPath(); g.ellipse(cx + 3, cy + 4, 30, 27, 0, 0, TAU); g.fill();
-    // 深色凹槽
-    const hole = g.createRadialGradient(cx - 8, cy - 9, 3, cx, cy, 30);
-    hole.addColorStop(0, '#1a1014'); hole.addColorStop(.62, '#120a0e'); hole.addColorStop(1, '#3a2620');
-    g.beginPath(); g.arc(cx, cy, 28.5, 0, TAU); g.fillStyle = hole; g.fill();
-    g.strokeStyle = 'rgba(18,10,8,.95)'; g.lineWidth = 3; g.stroke();
-    g.strokeStyle = 'rgba(210,156,96,.24)'; g.lineWidth = 2;
-    g.beginPath(); g.arc(cx, cy, 25.5, Math.PI * 1.02, Math.PI * 1.7); g.stroke();
-    g.beginPath(); g.arc(cx, cy, 25.5, Math.PI * 1.88, Math.PI * 2.22); g.stroke();
-
-    g.save(); g.translate(cx, cy); g.rotate(-0.16);
-    const arm = 26, wid = 14;
-    const plus = (x, y, w, r) => {
-      rr(g, -w / 2 + x, -arm + y, w, arm * 2, r); g.fill();
-      rr(g, -arm + x, -w / 2 + y, arm * 2, w, r); g.fill();
+    // 极轻的投影，避免黑色大坑
+    g.fillStyle = 'rgba(0,0,0,.32)'; g.beginPath(); g.ellipse(cx + 2, cy + 4, 22, 18, 0, 0, TAU); g.fill();
+    g.save(); g.translate(cx, cy); g.rotate(-.12);
+    const arm = 23, wid = 14;
+    const plus = (ox, oy, w, r) => {
+      rr(g, -w / 2 + ox, -arm + oy, w, arm * 2, r); g.fill();
+      rr(g, -arm + ox, -w / 2 + oy, arm * 2, w, r); g.fill();
     };
-    // 深色描边层（稍大），再叠彩色主体，得到干净的十字轮廓
-    g.fillStyle = dark(dk, .6);
-    plus(2.6, 3.4, wid + 4, 8);
-    plus(0, 0, wid + 4, 8);
-    // 凸台侧壁
-    g.fillStyle = dark(dk, .22);
-    plus(2.2, 3, wid, 7);
-    // 十字主体
+    // 深色轮廓
+    g.fillStyle = dark(dk, .45); plus(1.4, 2.0, wid + 5, 7);
+    // 彩色主体
     const face = g.createLinearGradient(-arm, -arm, arm, arm);
-    face.addColorStop(0, light(base, .42)); face.addColorStop(.3, light(base, .1));
-    face.addColorStop(.64, base); face.addColorStop(1, dark(base, .16));
-    g.fillStyle = face;
-    plus(0, 0, wid, 7);
-    // 左上倒角高光
-    g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 3;
+    face.addColorStop(0, light(base, .18)); face.addColorStop(.35, base);
+    face.addColorStop(.82, dark(base, .06)); face.addColorStop(1, dark(base, .3));
+    g.fillStyle = face; plus(0, 0, wid + 1, 7);
+    // 左上高光
+    g.save(); g.beginPath(); g.rect(-arm, -arm, arm * 2, arm * 2); g.clip();
+    g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 3;
     g.beginPath(); g.moveTo(-arm + 7, -wid / 2 + 2); g.lineTo(-wid / 2 + 2, -wid / 2 + 2); g.lineTo(-wid / 2 + 2, -arm + 7); g.stroke();
-    g.beginPath(); g.moveTo(wid / 2 - 1, -arm + 7); g.lineTo(wid / 2 - 1, -wid / 2 + 1); g.stroke();
-    // 右下暗边
-    g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = 3;
-    g.beginPath(); g.moveTo(-wid / 2 + 2, arm - 6); g.lineTo(-wid / 2 + 2, wid / 2 + 1); g.lineTo(arm - 6, wid / 2 + 1); g.stroke();
-    // 中心内六角
-    g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.fillStyle = dark(dk, .62); g.fill();
-    g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = 1.6; g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = 1.6; g.beginPath(); g.arc(-1, -1, 5, Math.PI, TAU * .92); g.stroke();
-    // 金属擦痕
-    g.strokeStyle = 'rgba(255,255,255,.2)'; g.lineWidth = 1.1;
-    for (let i = 0; i < 2; i++) { g.beginPath(); g.moveTo(-18 + i * 7, -19 + i * 2); g.lineTo(-9 + i * 6, -21 + i * 2); g.stroke(); }
+    g.beginPath(); g.moveTo(-arm + 7, -wid / 2 + 2); g.lineTo(-arm + 7, arm - 5); g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 2; g.stroke();
     g.restore();
-
-    const glow = g.createRadialGradient(cx, cy, 18, cx, cy, 38);
-    glow.addColorStop(0, rgba(base, .14)); glow.addColorStop(.7, rgba(base, .04)); glow.addColorStop(1, rgba(base, 0));
-    g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, 38, 0, TAU); g.fill();
+    // 中心浅凹点
+    g.beginPath(); g.arc(0, 0, 3.5, 0, TAU); g.fillStyle = rgba(light(base, .55), .65); g.fill();
+    g.strokeStyle = rgba(dark(dk, .4), .45); g.lineWidth = 1.2; g.stroke();
+    g.restore();
+    const glow = g.createRadialGradient(cx, cy, 18, cx, cy, 35);
+    glow.addColorStop(0, rgba(base, .09)); glow.addColorStop(1, rgba(base, 0));
+    g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, 35, 0, TAU); g.fill();
   });
 }
 
-// ---------- 托盘底座（嵌进砖台的粉色霓虹台） ----------
+// ---------- 托盘底座与托盘 ----------
 function buildTrayMount(S) {
-  return mk(402, 178, (g, W, H) => {
-    const R = rng(188);
-    g.fillStyle = 'rgba(0,0,0,.5)'; rr(g, 6, 20, W - 8, H - 18, 26); g.fill();
-    // 砖台
-    g.save(); rr(g, 2, 4, W - 4, H - 30, 24); g.clip();
-    drawBrickWall(g, -6, 0, W + 12, H, S.brickColor, S.brickDark, 121, { bh: 27, bw: 74, gap: 5 });
-    g.fillStyle = 'rgba(12,7,10,.35)'; g.fillRect(0, 0, W, H);
-    const sh = g.createLinearGradient(0, 0, 0, H);
-    sh.addColorStop(0, 'rgba(255,220,190,.16)'); sh.addColorStop(.28, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,.55)');
-    g.fillStyle = sh; g.fillRect(0, 0, W, H);
-    g.restore();
-    rr(g, 2, 4, W - 4, H - 30, 24); g.strokeStyle = rgba(dark(S.brickDark, .55), .95); g.lineWidth = 4; g.stroke();
-    rr(g, 8, 10, W - 16, H - 42, 19); g.strokeStyle = 'rgba(0,0,0,.42)'; g.lineWidth = 3; g.stroke();
-    // 粉色霓虹嵌框
-    const neon = g.createLinearGradient(0, 14, 0, H - 34);
-    neon.addColorStop(0, light(S.trayColor, .45)); neon.addColorStop(.45, S.trayColor); neon.addColorStop(1, dark(S.trayColor, .35));
-    rr(g, 22, 26, W - 44, H - 78, 15); g.fillStyle = rgba(dark(S.brickDark, .78), 1); g.fill();
-    rr(g, 22, 26, W - 44, H - 78, 15); g.strokeStyle = neon; g.lineWidth = 7; g.stroke();
-    rr(g, 30, 34, W - 60, H - 94, 11); g.strokeStyle = rgba(light(S.trayColor, .35), .5); g.lineWidth = 2; g.stroke();
-    // 两侧铆钉
-    for (const [x, y] of [[14, 22], [W - 14, 22], [14, H - 20], [W - 14, H - 20]]) {
-      g.beginPath(); g.arc(x, y, 6, 0, TAU); g.fillStyle = dark(S.metalColor, .5); g.fill();
+  const T = trayGeom(S);
+  return mk(T.w + 62, T.h + 52, (g, W, H) => {
+    g.fillStyle = 'rgba(0,0,0,.45)'; rr(g, 8, 14, W - 12, H - 18, 22); g.fill();
+    // 粗石框
+    const frame = g.createLinearGradient(0, 0, 0, H);
+    frame.addColorStop(0, '#7b5c5e'); frame.addColorStop(.5, '#4a3336'); frame.addColorStop(1, '#2a1b1e');
+    rr(g, 2, 2, W - 4, H - 10, 20); fillStroke(g, frame, '#211416', 4);
+    g.save(); rr(g, 7, 7, W - 14, H - 20, 16); g.clip();
+    drawBrickWall(g, 0, 0, W, H, '#5b3b3f', '#2b1b1e', 121, { bh: 24, bw: 62, gap: 4 });
+    g.fillStyle = 'rgba(10,6,8,.35)'; g.fillRect(0, 0, W, H); g.restore();
+    // 内嵌深槽
+    rr(g, 20, 18, W - 40, H - 42, 14); g.fillStyle = '#1b1114'; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 4; g.stroke();
+    g.strokeStyle = 'rgba(190,170,170,.18)'; g.lineWidth = 2; rr(g, 24, 22, W - 48, H - 50, 11); g.stroke();
+    // 铆钉
+    for (const [x, y] of [[16, 16], [W - 16, 16], [16, H - 18], [W - 16, H - 18]]) {
+      g.beginPath(); g.arc(x, y, 5, 0, TAU); g.fillStyle = '#6b5d5a'; g.fill();
       g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 1.5; g.stroke();
-      g.beginPath(); g.arc(x - 1.5, y - 1.5, 2.2, 0, TAU); g.fillStyle = rgba('#fff', .4); g.fill();
+      g.beginPath(); g.arc(x - 1, y - 1, 1.8, 0, TAU); g.fillStyle = 'rgba(255,255,255,.4)'; g.fill();
     }
   });
 }
 
-// ---------- 托盘 ----------
-function buildTray(S) {
+function buildTray(S, tint = null) {
   const T = trayGeom(S);
+  const col = tint || S.trayColor;
   return mk(T.w, T.h, (g, W, H) => {
-    g.fillStyle = 'rgba(0,0,0,.45)'; rr(g, 8, 16, W - 12, H - 10, 24); g.fill();
+    const dk = dark(col, .5);
+    g.fillStyle = 'rgba(0,0,0,.44)'; rr(g, 5, 10, W - 8, H - 6, 20); g.fill();
     const grd = g.createLinearGradient(0, 0, 0, H);
-    grd.addColorStop(0, light(S.trayColor, .35)); grd.addColorStop(.22, S.trayColor); grd.addColorStop(.78, dark(S.trayColor, .18)); grd.addColorStop(1, dark(S.trayColor, .42));
-    rr(g, 4, 4, W - 8, H - 8, 22); fillStroke(g, grd, dark(S.trayColor, .55), 4);
-    // 内嵌深色槽板
-    const inner = g.createLinearGradient(0, 20, 0, H - 14);
-    inner.addColorStop(0, dark(S.trayColor, .62)); inner.addColorStop(1, dark(S.trayColor, .78));
-    rr(g, 22, 22, W - 44, H - 38, 16); fillStroke(g, inner, dark(S.trayColor, .6), 3);
-    // 槽位
+    grd.addColorStop(0, light(col, .62)); grd.addColorStop(.24, light(col, .28)); grd.addColorStop(.68, col); grd.addColorStop(1, dark(col, .2));
+    rr(g, 3, 3, W - 6, H - 12, 18); fillStroke(g, grd, dark(dk, .35), 4);
+    // 发光内框（参考视频托盘会随当前颜色泛光）
+    g.save(); g.shadowColor = rgba(light(col, .35), .95); g.shadowBlur = 16;
+    rr(g, 13, 13, W - 26, H - 30, 13); g.strokeStyle = rgba(light(col, .55), .95); g.lineWidth = 4; g.stroke(); g.restore();
+    rr(g, 18, 17, W - 36, H - 36, 11); g.fillStyle = rgba(dark(col, .28), .92); g.fill();
+    // 三个圆槽
     for (const sx of T.slots) {
-      const cx = W / 2 + sx, cy = H / 2 + 3;
-      const hole = g.createRadialGradient(cx - 6, cy - 6, 3, cx, cy, 34);
-      hole.addColorStop(0, '#2a1420'); hole.addColorStop(.7, '#170b12'); hole.addColorStop(1, '#3b1b2b');
-      g.beginPath(); g.arc(cx, cy, 31, 0, TAU); g.fillStyle = hole; g.fill();
-      g.strokeStyle = rgba(S.trayColor, .85); g.lineWidth = 4; g.stroke();
-      g.strokeStyle = rgba(light(S.trayColor, .5), .5); g.lineWidth = 1.5; g.beginPath(); g.arc(cx, cy, 35, Math.PI * 1.04, Math.PI * 1.6); g.stroke();
+      const cx = W / 2 + sx, cy = H / 2 - 2;
+      const hole = g.createRadialGradient(cx - 5, cy - 5, 2, cx, cy, 27);
+      hole.addColorStop(0, '#3a1e2a'); hole.addColorStop(.7, '#1c0e15'); hole.addColorStop(1, '#2c151f');
+      g.beginPath(); g.arc(cx, cy, 25, 0, TAU); g.fillStyle = hole; g.fill();
+      g.strokeStyle = rgba(light(col, .4), .8); g.lineWidth = 3; g.stroke();
+      g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.2; g.beginPath(); g.arc(cx, cy, 21, 0, TAU); g.stroke();
     }
-    // 顶部高光与铆钉
-    g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(28, 13); g.lineTo(W - 26, 13); g.stroke();
-    for (const x of [15, W - 15]) for (const y of [18, H - 16]) {
-      g.beginPath(); g.arc(x, y, 5, 0, TAU); g.fillStyle = dark(S.trayColor, .55); g.fill();
-      g.beginPath(); g.arc(x - 1, y - 1, 2, 0, TAU); g.fillStyle = rgba('#fff', .45); g.fill();
-    }
-    // 底部小灯条
-    g.fillStyle = rgba(S.glowColor, .25); rr(g, W / 2 - 60, H - 13, 120, 4, 2); g.fill();
-    g.fillStyle = rgba(light(S.trayColor, .6), .5); g.font = '700 10px "PingFang SC",sans-serif'; g.textAlign = 'center'; g.fillText('S C R E W   S O R T E R', W / 2, H - 18);
+    // 顶部高光
+    g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 2; g.beginPath(); g.moveTo(22, 9); g.lineTo(W - 22, 9); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.3)'; rr(g, 22, 8, W - 44, 5, 2.5); g.fill();
   });
 }
 
@@ -611,7 +693,7 @@ function buildWeight(S) {
 function buildAcid(S) {
   return mk(244, 620, (g, W, H) => {
     const grd = g.createLinearGradient(0, 0, 0, H);
-    grd.addColorStop(0, 'rgba(140,245,80,.15)'); grd.addColorStop(.18, rgba(S.acidColor, .8)); grd.addColorStop(.5, dark(S.acidColor, .22)); grd.addColorStop(1, dark(S.acidColor, .65));
+    grd.addColorStop(0, 'rgba(180,255,120,.18)'); grd.addColorStop(.12, rgba(light(S.acidColor, .2), .92)); grd.addColorStop(.3, rgba(S.acidColor, .78)); grd.addColorStop(.68, dark(S.acidColor, .45)); grd.addColorStop(1, dark(S.acidColor, .78));
     g.fillStyle = grd; g.fillRect(0, 0, W, H);
     // 表面波纹
     const R = rng(81);
@@ -627,6 +709,16 @@ function buildAcid(S) {
       g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = rgba(light(S.acidColor, .6), .16 + R() * .2); g.fill();
       g.strokeStyle = rgba(light(S.acidColor, .8), .2); g.lineWidth = 1; g.stroke();
     }
+    // 亮色液面
+    g.strokeStyle = 'rgba(230,255,170,.75)'; g.lineWidth = 4;
+    g.beginPath(); g.moveTo(0, 10);
+    for (let x = 0; x <= W; x += 12) g.lineTo(x, 10 + Math.sin(x * .07) * 4);
+    g.stroke();
+    // 边缘暗部
+    const edge = g.createLinearGradient(0, 0, W, 0);
+    edge.addColorStop(0, 'rgba(0,0,0,.5)'); edge.addColorStop(.18, 'rgba(0,0,0,0)');
+    edge.addColorStop(.82, 'rgba(0,0,0,0)'); edge.addColorStop(1, 'rgba(0,0,0,.5)');
+    g.fillStyle = edge; g.fillRect(0, 0, W, H);
     // 反光
     const gl = g.createLinearGradient(0, 0, W, 0);
     gl.addColorStop(0, 'rgba(255,255,255,.18)'); gl.addColorStop(.2, 'rgba(255,255,255,0)'); gl.addColorStop(.7, 'rgba(255,255,255,.05)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
@@ -645,7 +737,7 @@ function buildBubble(S) {
 
 // ---------- 矿工 ----------
 function drawFace(g, mode = 'scared') {
-  const skin = '#f0bd93', ink = '#3b241c';
+  const skin = '#f3c7a3', ink = '#30201b';
   // 头
   g.beginPath(); g.ellipse(0, 0, 35, 36, -.03, 0, TAU); g.fillStyle = skin; g.fill();
   g.strokeStyle = ink; g.lineWidth = 3.4; g.stroke();
@@ -653,15 +745,15 @@ function drawFace(g, mode = 'scared') {
   g.beginPath(); g.ellipse(-34, 4, 7, 9, 0, 0, TAU); g.fillStyle = skin; g.fill(); g.stroke();
   g.beginPath(); g.arc(-34, 4, 3, 0, TAU); g.fillStyle = '#d79572'; g.fill();
   // 头发
-  g.fillStyle = '#c76b2e';
+  g.fillStyle = '#e9b955';
   for (const [x, y, r] of [[-26, -27, 12], [-8, -34, 13], [12, -32, 12], [27, -22, 9]]) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
   g.strokeStyle = rgba(ink, .8); g.lineWidth = 2; g.stroke();
   // 帽子
   g.save(); g.rotate(-.08);
   const cap = g.createLinearGradient(-10, -52, 10, -20);
-  cap.addColorStop(0, '#fff4d9'); cap.addColorStop(.6, '#efe0bd'); cap.addColorStop(1, '#cfbc98');
+  cap.addColorStop(0, '#fffdf4'); cap.addColorStop(.6, '#f6efdf'); cap.addColorStop(1, '#d9d1c0');
   g.beginPath(); g.ellipse(0, -33, 30, 20, 0, Math.PI, TAU); g.quadraticCurveTo(30, -15, 0, -15); g.quadraticCurveTo(-30, -15, -30, -33); g.closePath(); g.fillStyle = cap; g.fill(); g.strokeStyle = ink; g.lineWidth = 3; g.stroke();
-  g.beginPath(); g.ellipse(-30, -28, 20, 7, -.25, Math.PI * .92, Math.PI * 1.95); g.fillStyle = '#f7e9c9'; g.fill(); g.strokeStyle = ink; g.lineWidth = 2.6; g.stroke();
+  g.beginPath(); g.ellipse(-30, -28, 20, 7, -.25, Math.PI * .92, Math.PI * 1.95); g.fillStyle = '#fffaf0'; g.fill(); g.strokeStyle = ink; g.lineWidth = 2.6; g.stroke();
   g.strokeStyle = 'rgba(50,70,55,.8)'; g.lineWidth = 3; g.beginPath(); g.moveTo(-27, -25); g.quadraticCurveTo(-4, -37, 22, -28); g.stroke();
   g.fillStyle = '#56705a'; g.beginPath(); g.arc(13, -19, 4.5, 0, TAU); g.fill();
   g.restore();
@@ -696,14 +788,14 @@ function drawFace(g, mode = 'scared') {
     g.beginPath(); g.moveTo(31, -9); g.quadraticCurveTo(37, 0, 31, 4); g.quadraticCurveTo(25, 0, 31, -9); g.fillStyle = 'rgba(120,210,235,.8)'; g.fill(); g.strokeStyle = 'rgba(50,120,150,.7)'; g.lineWidth = 1.5; g.stroke();
   }
   // 脖子
-  g.fillStyle = '#e0a77e'; g.fillRect(-11, 27, 22, 12); g.strokeStyle = ink; g.lineWidth = 2.5; g.strokeRect(-11, 27, 22, 12);
+  g.fillStyle = '#e8b48e'; g.fillRect(-11, 27, 22, 12); g.strokeStyle = ink; g.lineWidth = 2.5; g.strokeRect(-11, 27, 22, 12);
 }
 function buildHead(mode) {
   return mk(132, 132, (g) => { g.translate(66, 66); drawFace(g, mode); });
 }
-function buildBody() {
+function buildBody(rope = true) {
   return mk(138, 154, (g, W, H) => {
-    const ink = '#3b241c', skin = '#eab086';
+    const ink = '#30201b', skin = '#f0c19e';
     g.translate(W / 2, H - 16);
     // 躯干
     g.beginPath(); g.moveTo(-26, -112); g.quadraticCurveTo(-38, -64, -30, -4); g.quadraticCurveTo(0, 10, 31, -4); g.quadraticCurveTo(38, -64, 27, -112); g.quadraticCurveTo(0, -126, -26, -112); g.closePath();
@@ -719,18 +811,20 @@ function buildBody() {
     sh.addColorStop(0, '#f06b72'); sh.addColorStop(1, '#b83444');
     g.fillStyle = sh; g.fill(); g.strokeStyle = ink; g.lineWidth = 3; g.stroke();
     g.strokeStyle = 'rgba(90,20,30,.5)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -18); g.lineTo(1, 4); g.stroke();
-    // 腰间绳
-    g.strokeStyle = '#c9a458'; g.lineWidth = 6; g.beginPath(); g.moveTo(-32, -38); g.quadraticCurveTo(0, -28, 32, -38); g.stroke();
-    g.strokeStyle = 'rgba(90,60,20,.45)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-32, -40); g.quadraticCurveTo(0, -30, 32, -40); g.stroke();
-    // 绑在胸口的绳圈
-    for (let i = 0; i < 3; i++) {
-      g.strokeStyle = i === 1 ? '#d9b665' : '#c9a458'; g.lineWidth = 6 - i * .8;
-      g.beginPath(); g.moveTo(-29, -99 + i * 17); g.quadraticCurveTo(0, -91 + i * 17, 29, -102 + i * 17); g.stroke();
-      g.strokeStyle = 'rgba(90,60,20,.4)'; g.lineWidth = 1.3; g.beginPath(); g.moveTo(-29, -101 + i * 17); g.quadraticCurveTo(0, -93 + i * 17, 29, -104 + i * 17); g.stroke();
+    if (rope) {
+      // 腰间绳
+      g.strokeStyle = '#c9a458'; g.lineWidth = 6; g.beginPath(); g.moveTo(-32, -38); g.quadraticCurveTo(0, -28, 32, -38); g.stroke();
+      g.strokeStyle = 'rgba(90,60,20,.45)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-32, -40); g.quadraticCurveTo(0, -30, 32, -40); g.stroke();
+      // 绑在胸口的绳圈
+      for (let i = 0; i < 3; i++) {
+        g.strokeStyle = i === 1 ? '#d9b665' : '#c9a458'; g.lineWidth = 6 - i * .8;
+        g.beginPath(); g.moveTo(-29, -99 + i * 17); g.quadraticCurveTo(0, -91 + i * 17, 29, -102 + i * 17); g.stroke();
+        g.strokeStyle = 'rgba(90,60,20,.4)'; g.lineWidth = 1.3; g.beginPath(); g.moveTo(-29, -101 + i * 17); g.quadraticCurveTo(0, -93 + i * 17, 29, -104 + i * 17); g.stroke();
+      }
+      // 绳结
+      g.fillStyle = '#d9b665'; g.beginPath(); g.arc(-4, -52, 7, 0, TAU); g.fill(); g.strokeStyle = '#8b6529'; g.lineWidth = 2; g.stroke();
+      g.strokeStyle = '#c9a458'; g.lineWidth = 4; g.beginPath(); g.moveTo(-4, -45); g.quadraticCurveTo(6, -30, 2, -20); g.stroke();
     }
-    // 绳结
-    g.fillStyle = '#d9b665'; g.beginPath(); g.arc(-4, -52, 7, 0, TAU); g.fill(); g.strokeStyle = '#8b6529'; g.lineWidth = 2; g.stroke();
-    g.strokeStyle = '#c9a458'; g.lineWidth = 4; g.beginPath(); g.moveTo(-4, -45); g.quadraticCurveTo(6, -30, 2, -20); g.stroke();
     // 肚脐
     g.beginPath(); g.ellipse(1, -45, 2.2, 3, 0, 0, TAU); g.fillStyle = 'rgba(120,60,40,.6)'; g.fill();
     // 平台阴影接触
@@ -739,7 +833,7 @@ function buildBody() {
 }
 function buildArm(kind = 'front') {
   return mk(118, 56, (g, W, H) => {
-    const ink = '#3b241c', skin = kind === 'front' ? '#ecb389' : '#d99a70';
+    const ink = '#30201b', skin = kind === 'front' ? '#f4c7a3' : '#dda67f';
     g.translate(W - 12, H / 2);
     // 手臂向右为肩，拳头在左
     g.beginPath(); g.moveTo(8, -13); g.quadraticCurveTo(-26, -17, -54, -11); g.quadraticCurveTo(-82, -7, -88, 0); g.quadraticCurveTo(-82, 8, -54, 10); g.quadraticCurveTo(-26, 15, 8, 14); g.closePath();
@@ -751,15 +845,36 @@ function buildArm(kind = 'front') {
     g.strokeStyle = 'rgba(120,60,40,.5)'; g.lineWidth = 1.6; g.beginPath(); g.arc(-91, 0, 7, .2, 2.9); g.stroke();
     // 肘窝
     g.strokeStyle = 'rgba(140,75,50,.35)'; g.lineWidth = 2; g.beginPath(); g.arc(-52, 1, 7, -.6, .8); g.stroke();
-    // 手腕绳
-    g.strokeStyle = '#c9a458'; g.lineWidth = 4; g.beginPath(); g.moveTo(-70, -12); g.quadraticCurveTo(-66, 0, -70, 12); g.stroke();
     // 上臂阴影
     g.fillStyle = 'rgba(255,255,255,.12)'; g.beginPath(); g.ellipse(-25, -7, 18, 4, -.1, 0, TAU); g.fill();
   });
 }
+function buildArmScared(side = 'l') {
+  return mk(120, 120, (g, W, H) => {
+    const ink = '#30201b', skin = side === 'l' ? '#f0c19e' : '#e7b58f';
+    const sh = side === 'l' ? { x: 100, y: 82 } : { x: 20, y: 82 };
+    const el = side === 'l' ? { x: 66, y: 102 } : { x: 54, y: 102 };
+    const fi = side === 'l' ? { x: 84, y: 24 } : { x: 36, y: 24 };
+    const stroke = (a, b, w, col) => { g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); };
+    // 深色描边
+    stroke(sh, el, 30, ink); stroke(el, fi, 27, ink);
+    g.beginPath(); g.arc(fi.x, fi.y, 18, 0, TAU); g.fillStyle = ink; g.fill();
+    // 皮肤
+    stroke(sh, el, 23, skin); stroke(el, fi, 20, skin);
+    g.beginPath(); g.arc(fi.x, fi.y, 14, 0, TAU); g.fillStyle = light(skin, .08); g.fill(); g.strokeStyle = ink; g.lineWidth = 2.6; g.stroke();
+    // 肘部/手背阴影
+    g.strokeStyle = 'rgba(140,80,55,.35)'; g.lineWidth = 3; g.beginPath(); g.arc(el.x, el.y, 9, -.4, 1.2); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,.24)'; g.lineWidth = 2.5;
+    g.beginPath(); g.moveTo(sh.x - (side === 'l' ? 5 : -5), sh.y - 2); g.lineTo(el.x - (side === 'l' ? 3 : -3), el.y - 2); g.stroke();
+    // 指节
+    g.strokeStyle = 'rgba(120,65,45,.45)'; g.lineWidth = 1.8;
+    g.beginPath(); g.moveTo(fi.x - 6, fi.y - 4); g.quadraticCurveTo(fi.x, fi.y - 8, fi.x + 6, fi.y - 4); g.stroke();
+  });
+}
+
 function buildLeg(kind = 'front') {
   return mk(62, 92, (g, W, H) => {
-    const ink = '#3b241c', skin = kind === 'front' ? '#eab086' : '#d0956d';
+    const ink = '#30201b', skin = kind === 'front' ? '#f0c19e' : '#d9a078';
     g.translate(W / 2, 6);
     // 大腿小腿
     g.beginPath(); g.moveTo(-12, 0); g.quadraticCurveTo(-16, 28, -12, 48); g.quadraticCurveTo(-8, 66, -11, 80); g.lineTo(12, 82); g.quadraticCurveTo(15, 62, 12, 48); g.quadraticCurveTo(15, 26, 12, 0); g.closePath();
@@ -808,58 +923,54 @@ function buildEndHero() {
 
 // ---------- HUD ----------
 function buildTimerRing(S, phase) {
-  const col = phase === 'g' ? '#54e06a' : phase === 'y' ? '#ffd447' : '#ff4d5a';
-  return mk(124, 124, (g, W, H) => {
+  const col = phase === 'g' ? '#5ee63f' : phase === 'y' ? '#f4df3a' : '#ff3f3f';
+  return mk(96, 96, (g, W, H) => {
     const cx = W / 2, cy = H / 2;
-    g.fillStyle = 'rgba(0,0,0,.38)'; g.beginPath(); g.arc(cx + 2, cy + 4, 54, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(0,0,0,.38)'; g.beginPath(); g.arc(cx + 2, cy + 4, 42, 0, TAU); g.fill();
+    // 深色外框
     const rim = g.createLinearGradient(0, 0, 0, H);
-    rim.addColorStop(0, '#4b4b58'); rim.addColorStop(.5, '#22222b'); rim.addColorStop(1, '#111116');
-    g.beginPath(); g.arc(cx, cy, 53, 0, TAU); g.fillStyle = rim; g.fill(); g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = 4; g.stroke();
-    g.beginPath(); g.arc(cx, cy, 46, 0, TAU); g.strokeStyle = dark(col, .15); g.lineWidth = 6; g.stroke();
-    const glow = g.createRadialGradient(cx, cy, 20, cx, cy, 48);
-    glow.addColorStop(0, rgba(col, .05)); glow.addColorStop(.75, rgba(col, .24)); glow.addColorStop(1, rgba(col, 0));
-    g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, 48, 0, TAU); g.fill();
-    g.beginPath(); g.arc(cx, cy, 44, 0, TAU); g.strokeStyle = rgba(col, .9); g.lineWidth = 3; g.stroke();
-    // 刻度
-    for (let i = 0; i < 20; i++) {
-      const a = i / 20 * TAU, r1 = 48.5, r2 = i % 5 === 0 ? 54 : 51.5;
-      g.strokeStyle = i % 5 === 0 ? rgba(col, .9) : 'rgba(255,255,255,.22)'; g.lineWidth = i % 5 === 0 ? 2.4 : 1.2;
-      g.beginPath(); g.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2); g.stroke();
+    rim.addColorStop(0, '#4a4147'); rim.addColorStop(.5, '#2b2328'); rim.addColorStop(1, '#171114');
+    g.beginPath(); g.arc(cx, cy, 43, 0, TAU); g.fillStyle = rim; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 3; g.stroke();
+    // 彩色表盘
+    const face = g.createRadialGradient(cx - 8, cy - 10, 5, cx, cy, 38);
+    if (phase === 'r') {
+      face.addColorStop(0, '#6d1b1b'); face.addColorStop(.65, '#3d0d0f'); face.addColorStop(1, '#21070a');
+    } else {
+      face.addColorStop(0, light(col, .25)); face.addColorStop(.62, col); face.addColorStop(1, dark(col, .18));
     }
-    g.beginPath(); g.arc(cx, cy, 35, 0, TAU); g.fillStyle = 'rgba(10,8,12,.62)'; g.fill();
-    // 小时漏标志
-    g.fillStyle = rgba(col, .35); g.font = '700 9px "PingFang SC",sans-serif'; g.textAlign = 'center'; g.fillText('T I M E', cx, cy + 30);
+    g.beginPath(); g.arc(cx, cy, 37, 0, TAU); g.fillStyle = face; g.fill();
+    g.strokeStyle = col; g.lineWidth = 4; g.stroke();
+    g.beginPath(); g.arc(cx, cy, 32, 0, TAU); g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 2; g.stroke();
+    // 顶部高光
+    g.beginPath(); g.ellipse(cx - 9, cy - 23, 13, 5, -.4, 0, TAU); g.fillStyle = 'rgba(255,255,255,.26)'; g.fill();
   });
 }
 function buildTimerMarker(S) {
-  return mk(28, 28, (g, W, H) => {
-    const grd = g.createRadialGradient(W / 2, H / 2, 1, W / 2, H / 2, 14);
-    grd.addColorStop(0, '#fff'); grd.addColorStop(.3, S.glowColor); grd.addColorStop(1, rgba(S.glowColor, 0));
-    g.fillStyle = grd; g.beginPath(); g.arc(W / 2, H / 2, 14, 0, TAU); g.fill();
+  return mk(22, 22, (g, W, H) => {
+    const grd = g.createRadialGradient(W / 2, H / 2, 1, W / 2, H / 2, 11);
+    grd.addColorStop(0, '#fff'); grd.addColorStop(.4, S.glowColor); grd.addColorStop(1, rgba(S.glowColor, 0));
+    g.fillStyle = grd; g.beginPath(); g.arc(W / 2, H / 2, 11, 0, TAU); g.fill();
   });
 }
-function buildDigit(n, S) {
-  return mk(48, 76, (g, W, H) => {
-    g.font = '900 66px "Arial Black","PingFang SC","Microsoft YaHei",sans-serif';
+function buildDigit(n, S, white = false) {
+  return mk(38, 58, (g, W, H) => {
+    g.font = '900 50px "Arial Black","PingFang SC","Microsoft YaHei",sans-serif';
     g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 9; g.strokeStyle = 'rgba(8,6,10,.95)'; g.strokeText(String(n), W / 2, H / 2 + 3);
-    g.lineWidth = 4; g.strokeStyle = dark(S.glowColor, .35); g.strokeText(String(n), W / 2, H / 2 + 2);
-    g.fillStyle = '#fff8e3'; g.fillText(String(n), W / 2, H / 2);
-    g.fillStyle = 'rgba(255,255,255,.4)'; g.fillText(String(n), W / 2, H / 2 - 2);
+    if (white) {
+      g.lineWidth = 8; g.strokeStyle = 'rgba(20,8,10,.9)'; g.strokeText(String(n), W / 2, H / 2 + 2);
+      g.fillStyle = '#fff7f3'; g.fillText(String(n), W / 2, H / 2);
+    } else {
+      g.lineWidth = 2.5; g.strokeStyle = 'rgba(255,255,255,.28)'; g.strokeText(String(n), W / 2, H / 2 + 2);
+      g.fillStyle = '#17110e'; g.fillText(String(n), W / 2, H / 2);
+    }
   });
 }
 function buildCaption(S) {
   if (!S.captionShow || !S.captionText) return null;
-  return mk(640, 92, (g, W, H) => {
-    g.font = '900 46px "PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif';
-    g.textBaseline = 'middle'; g.textAlign = 'center';
-    g.save(); g.translate(W / 2, H / 2); g.rotate(-.012);
-    g.lineWidth = 13; g.strokeStyle = 'rgba(32,17,24,.95)'; drawSpaced(g, S.captionText, 0, 4, 2);
-    g.lineWidth = 6; g.strokeStyle = 'rgba(72,38,28,.9)'; drawSpaced(g, S.captionText, 0, 3, 2);
-    const grd = g.createLinearGradient(0, -30, 0, 32);
-    grd.addColorStop(0, '#fffdf2'); grd.addColorStop(.55, '#ffe6a1'); grd.addColorStop(1, '#f6b948');
-    g.fillStyle = grd; drawSpaced(g, S.captionText, 0, 0, 2);
-    g.strokeStyle = 'rgba(120,70,20,.35)'; g.lineWidth = 1.5; g.strokeText(S.captionText, 0, 0);
+  return mk(690, 108, (g, W, H) => {
+    g.save(); g.translate(W / 2, H / 2);
+    drawOutlinedText(g, S.captionText, 0, 0, '900 50px "PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif', '#fffef8', 'rgba(16,12,14,.96)', 12, 3);
     g.restore();
   });
 }
@@ -957,76 +1068,176 @@ function buildWinRays(S) {
   });
 }
 
+// ---------- 失败徽章 / 白手套 ----------
+function buildFailBadge() {
+  return mk(330, 330, (g, W, H) => {
+    const cx = W / 2, cy = H / 2;
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.arc(cx + 5, cy + 9, 152, 0, TAU); g.fill();
+    g.beginPath(); g.arc(cx, cy, 148, 0, TAU); g.fillStyle = '#fffdf7'; g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 8; g.stroke();
+    const grd = g.createRadialGradient(cx - 35, cy - 45, 10, cx, cy, 132);
+    grd.addColorStop(0, '#ef557e'); grd.addColorStop(.65, '#df2f61'); grd.addColorStop(1, '#b81448');
+    g.beginPath(); g.arc(cx, cy, 132, 0, TAU); g.fillStyle = grd; g.fill();
+    g.beginPath(); g.arc(cx, cy, 115, 0, TAU); g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 4; g.stroke();
+    g.save(); g.translate(cx, cy + 2); g.rotate(-.05);
+    g.font = '900 94px "Arial Black","PingFang SC",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 10; g.strokeStyle = 'rgba(120,10,44,.25)'; g.strokeText('FAIL', 0, 4);
+    g.fillStyle = '#fffdf7'; g.fillText('FAIL', 0, 0);
+    g.restore();
+    // 白色高光
+    g.beginPath(); g.ellipse(cx - 48, cy - 80, 44, 18, -.5, 0, TAU); g.fillStyle = 'rgba(255,255,255,.18)'; g.fill();
+  });
+}
+
+function gloveCanvas() {
+  return mk(400, 480, (g) => {
+    const dark = '#22303a';
+    const cap = (x1, y1, x2, y2, r) => { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.lineCap = 'round'; g.stroke(); };
+    // 外层深色描边（所有部件先铺大一圈）
+    g.strokeStyle = dark; g.fillStyle = dark;
+    g.lineWidth = 68; cap(82, 46, 168, 240);
+    g.beginPath(); g.ellipse(218, 292, 96, 110, -.2, 0, TAU); g.fill();
+    g.lineWidth = 72; cap(133, 266, 92, 340);
+    for (const [x, y, r] of [[288, 256, 42], [310, 316, 42], [298, 372, 37]]) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+    // 白色主体
+    const white = g.createLinearGradient(60, 40, 340, 440);
+    white.addColorStop(0, '#ffffff'); white.addColorStop(.5, '#f8fdff'); white.addColorStop(1, '#d8edf8');
+    g.strokeStyle = 'rgba(248,253,255,1)'; g.fillStyle = white;
+    g.lineWidth = 60; cap(82, 46, 168, 240);
+    g.beginPath(); g.ellipse(218, 292, 90, 104, -.2, 0, TAU); g.fill();
+    g.lineWidth = 64; cap(133, 266, 92, 340);
+    for (const [x, y, r] of [[288, 256, 36], [310, 316, 36], [298, 372, 31]]) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+    // 食指关节与高光
+    g.strokeStyle = 'rgba(174,214,235,.55)'; g.lineWidth = 8; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(104, 112); g.quadraticCurveTo(150, 142, 176, 216); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 9;
+    g.beginPath(); g.moveTo(110, 68); g.quadraticCurveTo(136, 136, 158, 198); g.stroke();
+    // 拇指根弧线
+    g.strokeStyle = 'rgba(170,210,232,.5)'; g.lineWidth = 6;
+    g.beginPath(); g.moveTo(138, 300); g.quadraticCurveTo(170, 336, 212, 356); g.stroke();
+    // 折叠手指的接缝
+    g.strokeStyle = 'rgba(160,200,225,.4)'; g.lineWidth = 5;
+    g.beginPath(); g.arc(256, 286, 58, -.2, 1.15); g.stroke();
+    g.beginPath(); g.arc(268, 342, 54, -.15, 1.2); g.stroke();
+    // 黑色袖口
+    g.save(); g.translate(304, 410); g.rotate(.25);
+    g.fillStyle = '#1d2930'; rr(g, -82, -36, 164, 82, 22); g.fill();
+    g.strokeStyle = '#0c1318'; g.lineWidth = 5; g.stroke();
+    g.fillStyle = '#43545c'; rr(g, -72, -30, 144, 26, 12); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 3; g.beginPath(); g.moveTo(-60, -20); g.lineTo(60, -20); g.stroke();
+    g.restore();
+    // 指尖很轻的粉红
+    g.beginPath(); g.arc(86, 58, 14, 0, TAU); g.fillStyle = 'rgba(255,215,220,.45)'; g.fill();
+  });
+}
+
+export function gloveAsset(S) {
+  const c = gloveCanvas();
+  return { id: 'hand', c, w: c.width, h: c.height, ax: S.handAnchorX * c.width, ay: S.handAnchorY * c.height };
+}
+
 // ---------- 结束页 ----------
+function drawEndText(g, S, W, H) {
+  g.save(); g.translate(0, 0); g.rotate(-.02);
+  // 参考结束卡：橙色“无需下载”+ 白色“点击即玩哦”，错落排列
+  drawOutlinedText(g, S.endTitle || '无需下载', 240, 142, '900 56px "PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif', '#ff9b08', '#fffdf6', 12, 2);
+  drawOutlinedText(g, S.endSub || '点击即玩哦', 474, 222, '900 50px "PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif', '#fffdf6', '#d97706', 10, 2);
+  g.restore();
+  g.font = '400 14px "PingFang SC","Microsoft YaHei",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(62,58,58,.5)';
+  g.fillText('广告创意演示 · 实际玩法与奖励以游戏内为准', W / 2, 1234);
+}
+
 function buildEndCard(S, fail = false) {
   return mk(DW, DH, (g, W, H) => {
-    const R = rng(1234);
+    // 优先使用 AI 生成的原创黑猫照片（非参考视频素材）；加载失败时退回程序化黑猫。
+    if (endCatImg) {
+      g.drawImage(endCatImg, 0, 0, W, H);
+      drawEndText(g, S, W, H);
+      return;
+    }
     const bg = g.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#0c2b31'); bg.addColorStop(.45, '#102126'); bg.addColorStop(1, '#071012');
+    bg.addColorStop(0, '#fafafa'); bg.addColorStop(.55, '#f2f2f2'); bg.addColorStop(1, '#e8e9ea');
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
-    // 放射光
-    g.save(); g.translate(W / 2, 500);
-    for (let i = 0; i < 22; i++) {
-      const a = i / 22 * TAU; g.fillStyle = rgba(fail ? '#ff5a50' : S.glowColor, .025 + (i % 2) * .02);
-      g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 900, a, a + .11); g.closePath(); g.fill();
-    }
-    g.restore();
-    const glow = g.createRadialGradient(W / 2, 560, 20, W / 2, 560, 480);
-    glow.addColorStop(0, fail ? 'rgba(255,70,60,.24)' : rgba(S.glowColor, .2)); glow.addColorStop(.55, rgba(S.glowColor, .04)); glow.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = glow; g.fillRect(0, 0, W, H);
-    // 底部的巨石与螺丝
-    for (let i = 0; i < 20; i++) {
-      const x = R() * W, y = 1030 + R() * 250, r = 30 + R() * 60;
-      drawRock(g, x, y, r, i % 3 ? dark(S.rockColor, .4) : dark(S.rockColor, .6), 500 + i * 17);
-    }
-    for (let i = 0; i < 10; i++) {
-      const x = 60 + R() * 600, y = 980 + R() * 240, r = 18 + R() * 22;
-      g.save(); g.translate(x, y); g.rotate(R() * TAU); g.globalAlpha = .65;
-      const cols = ['red', 'blue', 'green', 'purple', 'yellow']; const col = COLOR_HEX[cols[i % 5]];
-      const rim = g.createRadialGradient(-5, -5, 2, 0, 0, r);
-      rim.addColorStop(0, light(col, .5)); rim.addColorStop(.7, col); rim.addColorStop(1, dark(col, .4));
-      g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fillStyle = rim; g.fill(); g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 2; g.stroke();
-      g.strokeStyle = 'rgba(20,10,15,.6)'; g.lineWidth = 3; g.beginPath(); g.moveTo(-r * .5, 0); g.lineTo(r * .5, 0); g.moveTo(0, -r * .5); g.lineTo(0, r * .5); g.stroke();
-      g.restore();
-    }
-    // 边框
-    g.strokeStyle = rgba(S.glowColor, .35); g.lineWidth = 4; rr(g, 14, 14, W - 28, H - 28, 30); g.stroke();
-    rr(g, 24, 24, W - 48, H - 48, 24); g.strokeStyle = 'rgba(255,255,255,.08)'; g.lineWidth = 2; g.stroke();
-    // 顶部小徽章
-    g.fillStyle = rgba(S.glowColor, .16); rr(g, W / 2 - 108, 62, 216, 34, 17); g.fill();
-    g.strokeStyle = rgba(S.glowColor, .5); g.lineWidth = 1.5; g.stroke();
-    g.fillStyle = rgba(light(S.glowColor, .5), .9); g.font = '700 13px "PingFang SC","Microsoft YaHei",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText('B O U L D E R   R E S C U E', W / 2, 80);
-    // 标题
-    g.font = '900 74px "PingFang SC","Microsoft YaHei",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 14; g.strokeStyle = 'rgba(0,0,0,.6)'; drawSpaced(g, '巨石营救', W / 2, 160, 6);
-    const title = g.createLinearGradient(0, 120, 0, 205);
-    title.addColorStop(0, '#fff9d8'); title.addColorStop(.45, '#ffe27a'); title.addColorStop(1, '#e29a24');
-    g.fillStyle = title; drawSpaced(g, '巨石营救', W / 2, 160, 6);
-    g.font = '700 28px "PingFang SC","Microsoft YaHei",sans-serif'; g.fillStyle = 'rgba(255,255,255,.9)';
-    g.fillText(fail ? '被埋住了！' : S.endTitle, W / 2, 224, W - 80);
-    g.font = '400 18px "PingFang SC","Microsoft YaHei",sans-serif'; g.fillStyle = 'rgba(220,235,230,.62)';
-    g.fillText(fail ? '托盘别塞满异色螺丝 · 再来一次' : S.endSub, W / 2, 260, W - 90);
-    // 中央信息板底部
-    g.fillStyle = 'rgba(5,12,13,.5)'; rr(g, 54, 868, W - 108, 218, 26); g.fill();
-    g.strokeStyle = 'rgba(255,255,255,.1)'; g.lineWidth = 2; g.stroke();
-    g.font = '700 18px "PingFang SC","Microsoft YaHei",sans-serif'; g.fillStyle = 'rgba(255,255,255,.8)';
-    g.fillText(fail ? '差一点就成功了' : '拆光螺丝 · 三消同色 · 带他回家', W / 2, 916);
-    // 三个卖点
-    const badges = fail ? ['三消同色', '别塞满托盘', '再来一次'] : ['42 颗螺丝', '14 组三消', '一座矿坑'];
-    badges.forEach((t, i) => {
-      const x = 166 + i * 194;
-      g.fillStyle = rgba(S.glowColor, .1); rr(g, x - 82, 946, 164, 42, 21); g.fill();
-      g.strokeStyle = rgba(S.glowColor, .25); g.lineWidth = 1.5; g.stroke();
-      g.fillStyle = 'rgba(255,248,220,.9)'; g.font = '700 17px "PingFang SC",sans-serif'; g.fillText(t, x, 967);
-    });
-    // 免责声明
-    g.font = '400 13px "PingFang SC",sans-serif'; g.fillStyle = 'rgba(255,255,255,.32)';
-    g.fillText('广告创意演示 · 实际玩法与奖励以游戏内为准', W / 2, 1220);
-    // 暗角
-    const vg = g.createRadialGradient(W / 2, H * .42, 200, W / 2, H * .5, H * .7);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.5)');
+    const vg = g.createRadialGradient(W * .48, H * .46, 180, W * .5, H * .5, H * .72);
+    vg.addColorStop(0, 'rgba(255,255,255,0)'); vg.addColorStop(1, 'rgba(120,120,125,.16)');
     g.fillStyle = vg; g.fillRect(0, 0, W, H);
+    // 地面柔光
+    const floor = g.createLinearGradient(0, 980, 0, H);
+    floor.addColorStop(0, 'rgba(190,190,195,0)'); floor.addColorStop(1, 'rgba(150,150,158,.2)');
+    g.fillStyle = floor; g.fillRect(0, 980, W, H - 980);
+    // 猫的地面阴影
+    g.save(); g.filter = 'blur(10px)'; g.fillStyle = 'rgba(70,62,64,.3)'; g.beginPath(); g.ellipse(360, 1120, 235, 42, 0, 0, TAU); g.fill(); g.restore();
+
+    // ---------- 原创黑猫 ----------
+    const ink = '#141416', fur = '#222226', fur2 = '#2f3035', rim = '#5b5e64';
+    g.save(); g.translate(360, 760);
+    // 尾巴
+    g.strokeStyle = ink; g.lineWidth = 54; g.lineCap = 'round'; g.beginPath();
+    g.moveTo(130, 260); g.bezierCurveTo(250, 360, 360, 300, 330, 190);
+    g.bezierCurveTo(312, 130, 250, 150, 250, 208); g.stroke();
+    g.strokeStyle = fur2; g.lineWidth = 32; g.beginPath();
+    g.moveTo(138, 256); g.bezierCurveTo(244, 340, 338, 290, 316, 204); g.stroke();
+    // 身体
+    const body = g.createRadialGradient(-40, 80, 20, 20, 200, 260);
+    body.addColorStop(0, '#3b3d43'); body.addColorStop(.45, fur); body.addColorStop(1, '#101012');
+    g.fillStyle = body; g.beginPath(); g.ellipse(0, 220, 170, 210, 0, 0, TAU); g.fill();
+    g.strokeStyle = ink; g.lineWidth = 8; g.stroke();
+    // 后腿 / 前腿
+    g.fillStyle = fur2; g.beginPath(); g.ellipse(-120, 300, 75, 105, .1, 0, TAU); g.fill(); g.strokeStyle = ink; g.lineWidth = 6; g.stroke();
+    g.fillStyle = fur; g.beginPath(); g.ellipse(110, 300, 70, 115, -.1, 0, TAU); g.fill(); g.strokeStyle = ink; g.lineWidth = 6; g.stroke();
+    // 前爪
+    for (const [x, y] of [[-120, 390], [110, 392]]) {
+      g.fillStyle = '#303238'; g.beginPath(); g.ellipse(x, y, 58, 34, 0, 0, TAU); g.fill(); g.strokeStyle = ink; g.lineWidth = 5; g.stroke();
+      g.strokeStyle = '#5a5c62'; g.lineWidth = 3;
+      for (let i = -1; i <= 1; i++) { g.beginPath(); g.moveTo(x + i * 17 - 4, y + 10); g.lineTo(x + i * 17 + 6, y + 27); g.stroke(); }
+    }
+    // 抬起的左前爪
+    g.strokeStyle = ink; g.lineWidth = 66; g.lineCap = 'round'; g.beginPath(); g.moveTo(-132, 160); g.lineTo(-208, 56); g.stroke();
+    g.strokeStyle = fur2; g.lineWidth = 46; g.beginPath(); g.moveTo(-132, 158); g.lineTo(-204, 62); g.stroke();
+    g.fillStyle = '#33353b'; g.beginPath(); g.ellipse(-212, 40, 56, 60, -.35, 0, TAU); g.fill(); g.strokeStyle = ink; g.lineWidth = 6; g.stroke();
+    g.fillStyle = '#b27b86'; g.beginPath(); g.ellipse(-204, 38, 22, 26, -.4, 0, TAU); g.fill();
+    g.fillStyle = '#33353b'; g.beginPath(); g.ellipse(-230, 68, 16, 19, -.5, 0, TAU); g.fill();
+    // 头
+    const head = g.createRadialGradient(-45, -180, 10, 0, -140, 190);
+    head.addColorStop(0, '#3d3f45'); head.addColorStop(.45, fur); head.addColorStop(1, '#0e0e10');
+    g.fillStyle = head; g.beginPath(); g.ellipse(0, -150, 160, 145, 0, 0, TAU); g.fill(); g.strokeStyle = ink; g.lineWidth = 8; g.stroke();
+    // 耳朵
+    for (const sgn of [-1, 1]) {
+      g.beginPath(); g.moveTo(sgn * 118, -250); g.quadraticCurveTo(sgn * 155, -350, sgn * 190, -294); g.quadraticCurveTo(sgn * 172, -240, sgn * 132, -226); g.closePath();
+      g.fillStyle = fur; g.fill(); g.strokeStyle = ink; g.lineWidth = 7; g.stroke();
+      g.beginPath(); g.moveTo(sgn * 138, -258); g.quadraticCurveTo(sgn * 156, -316, sgn * 176, -286); g.quadraticCurveTo(sgn * 160, -254, sgn * 144, -244); g.closePath();
+      g.fillStyle = '#6e4a55'; g.fill();
+    }
+    // 眼睛
+    for (const sgn of [-1, 1]) {
+      const ex = sgn * 63, ey = -165;
+      const eye = g.createRadialGradient(ex - 8, ey - 10, 2, ex, ey, 52);
+      eye.addColorStop(0, '#fff6a8'); eye.addColorStop(.35, '#ffd735'); eye.addColorStop(.8, '#d99b00'); eye.addColorStop(1, '#8f5b00');
+      g.beginPath(); g.ellipse(ex, ey, 48, 56, 0, 0, TAU); g.fillStyle = eye; g.fill();
+      g.strokeStyle = '#1b1308'; g.lineWidth = 5; g.stroke();
+      g.beginPath(); g.ellipse(ex + (sgn < 0 ? 5 : -5), ey + 2, 17, 36, -.05, 0, TAU); g.fillStyle = '#0c0b0a'; g.fill();
+      g.beginPath(); g.arc(ex - 11, ey - 16, 10, 0, TAU); g.fillStyle = '#fffef1'; g.fill();
+      g.beginPath(); g.arc(ex + 13, ey + 18, 4.5, 0, TAU); g.fillStyle = 'rgba(255,255,255,.8)'; g.fill();
+      // 上眼睑阴影
+      g.strokeStyle = 'rgba(30,25,20,.55)'; g.lineWidth = 4; g.beginPath(); g.arc(ex, ey, 50, Math.PI * 1.03, Math.PI * 1.55); g.stroke();
+    }
+    // 鼻子和嘴
+    g.fillStyle = '#b56d7a'; g.beginPath(); g.moveTo(0, -90); g.lineTo(-14, -103); g.quadraticCurveTo(0, -110, 14, -103); g.closePath(); g.fill();
+    g.strokeStyle = ink; g.lineWidth = 5; g.beginPath(); g.moveTo(0, -90); g.lineTo(0, -78); g.stroke();
+    g.beginPath(); g.ellipse(0, -45, 38, 34, 0, 0, TAU); g.fillStyle = '#3d1019'; g.fill(); g.strokeStyle = ink; g.lineWidth = 5; g.stroke();
+    g.beginPath(); g.ellipse(0, -27, 22, 17, 0, 0, TAU); g.fillStyle = '#e8798d'; g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 3;
+    for (const sgn of [-1, 1]) {
+      for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(sgn * 40, -75 + i * 12); g.lineTo(sgn * 135, -95 + i * 20); g.stroke(); }
+    }
+    // 毛发光泽
+    g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 10;
+    g.beginPath(); g.arc(-40, -200, 95, Math.PI * 1.1, Math.PI * 1.55); g.stroke();
+    g.beginPath(); g.moveTo(-110, 40); g.quadraticCurveTo(-130, 150, -95, 250); g.stroke();
+    g.restore();
+
+    drawEndText(g, S, W, H);
   });
 }
 function buildEndCta(S, text) {
@@ -1046,6 +1257,7 @@ function buildEndCta(S, text) {
 
 // ---------- 组装资产 ----------
 export function buildAssets(S, L) {
+  applyScene(S);
   const A = {};
   const B = boardGeom(L);
   add(A, 'background', buildBackground(S), 360, 640);
@@ -1055,6 +1267,8 @@ export function buildAssets(S, L) {
   add(A, 'slab', buildSlab(S));
   add(A, 'platform', buildPlatform(S), LAYOUT.platform.w / 2, LAYOUT.platform.h / 2);
   add(A, 'tray', buildTray(S), LAYOUT.tray.w / 2, LAYOUT.tray.h / 2);
+  for (const c of ['red', 'blue', 'green', 'purple', 'yellow', 'pink']) add(A, 'tray_' + c, buildTray(S, COLOR_HEX[c]), LAYOUT.tray.w / 2, LAYOUT.tray.h / 2);
+  add(A, 'tray_mount', buildTrayMount(S));
   add(A, 'pulley', buildPulley(S));
   add(A, 'weight', buildWeight(S));
   add(A, 'rope', mk(280, 18, (g, W, H) => {
@@ -1071,15 +1285,18 @@ export function buildAssets(S, L) {
   add(A, 'hero_head', buildHead('scared'));
   add(A, 'hero_head_happy', buildHeadHappy());
   add(A, 'hero_head_dizzy', buildHeadDizzy());
-  add(A, 'hero_body', buildBody(), 69, 138);
+  add(A, 'hero_body', buildBody(true), 69, 138);
+  add(A, 'hero_body_plain', buildBody(false), 69, 138);
   add(A, 'hero_arm_l', buildArm('back'), 106, 28);
   add(A, 'hero_arm_r', buildArm('front'), 106, 28);
+  add(A, 'hero_arm_scared_l', buildArmScared('l'), 100, 82);
+  add(A, 'hero_arm_scared_r', buildArmScared('r'), 20, 82);
   add(A, 'hero_leg_l', buildLeg('back'), 31, 8);
   add(A, 'hero_leg_r', buildLeg('front'), 31, 8);
   add(A, 'hero_shadow', mk(150, 38, (g, W, H) => { const grd = g.createRadialGradient(W / 2, H / 2, 2, W / 2, H / 2, 70); grd.addColorStop(0, 'rgba(0,0,0,.42)'); grd.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = grd; g.beginPath(); g.ellipse(W / 2, H / 2, 70, 18, 0, 0, TAU); g.fill(); }), 75, 19);
   add(A, 'timer_ring_g', buildTimerRing(S, 'g')); add(A, 'timer_ring_y', buildTimerRing(S, 'y')); add(A, 'timer_ring_r', buildTimerRing(S, 'r'));
   add(A, 'timer_marker', buildTimerMarker(S));
-  for (let n = 0; n <= 9; n++) add(A, 'digit_' + n, buildDigit(n, S));
+  for (let n = 0; n <= 9; n++) { add(A, 'digit_' + n, buildDigit(n, S)); add(A, 'digit_w_' + n, buildDigit(n, S, true)); }
   add(A, 'hint_ring', buildHintRing(S));
   add(A, 'match_ring', buildMatchRing(S));
   add(A, 'plus_time', buildPlusTime(S));
@@ -1089,6 +1306,8 @@ export function buildAssets(S, L) {
   add(A, 'dust', buildDust());
   add(A, 'flash_fail', buildFlash('#ff2f3a', 1));
   add(A, 'flash_win', buildFlash('#ffd75a', .72));
+  add(A, 'fail_badge', buildFailBadge());
+  add(A, 'glove', gloveCanvas());
   add(A, 'escape_glow', buildEscapeGlow(S));
   add(A, 'win_rays', buildWinRays(S), 380, 380);
   const cap = buildCaption(S); if (cap) add(A, 'caption', cap);

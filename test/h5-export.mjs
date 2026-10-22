@@ -162,7 +162,7 @@ try {
     if (ch === 'generic') await saveDataUrl(shot, path.join(artDir, 'generic-390x844.png'));
     // 手动点击一颗螺丝
     const cb = await page.locator('#stage').boundingBox();
-    await page.mouse.click(cb.x + cb.width * 280 / 720, cb.y + cb.height * 630 / 1280);
+    await page.mouse.click(cb.x + cb.width * 368 / 720, cb.y + cb.height * 838 / 1280);
     await page.waitForTimeout(300);
     const picked = await page.evaluate(() => __game.state.picked);
     check(picked >= 1, ch + ' 真实点击可拆螺丝', picked);

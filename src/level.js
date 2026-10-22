@@ -3,10 +3,11 @@
 // 生成器始终保证每种颜色的数量是 3 的倍数，因此一定存在“按颜色分组、三颗一消”的合法通关序列。
 
 export const DW = 720, DH = 1280;
-export const COLORS = ['red', 'blue', 'green', 'purple', 'yellow'];
-export const COLOR_HEX = { red: '#ef4b57', blue: '#3f8ee8', green: '#59c94b', purple: '#a75de0', yellow: '#e8d63c' };
-export const COLOR_DARK = { red: '#8f202b', blue: '#1d4f91', green: '#2b7a24', purple: '#5a2a84', yellow: '#8f7f12' };
-export const COLOR_LIGHT = { red: '#ff9aa2', blue: '#9ac8ff', green: '#b8f2a6', purple: '#ddb4ff', yellow: '#fff3a0' };
+// 参考视频使用粉/红/黄/绿/紫/蓝六色十字螺丝；前五色保持旧档配色不变，粉色为新增。
+export const COLORS = ['red', 'blue', 'green', 'purple', 'yellow', 'pink'];
+export const COLOR_HEX = { red: '#ef4b57', blue: '#3f8ee8', green: '#6fd33f', purple: '#a75de0', yellow: '#f2df38', pink: '#f04bd3' };
+export const COLOR_DARK = { red: '#8f202b', blue: '#1d4f91', green: '#357a1c', purple: '#5a2a84', yellow: '#8f7f12', pink: '#8a1f78' };
+export const COLOR_LIGHT = { red: '#ff9aa2', blue: '#9ac8ff', green: '#c8ffa3', purple: '#ddb4ff', yellow: '#fff8a8', pink: '#ffb0f0' };
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -83,7 +84,7 @@ export function maskFromAlpha(imageData, cols, rows, threshold = 0.5, cover = 0.
 }
 
 // 由 mask + 颜色数量构造关卡
-export function makeLevel({ cols = 7, rows = 6, colorCount = 5, seed = 1, mask = null, fixedColors = null } = {}) {
+export function makeLevel({ cols = 7, rows = 6, colorCount = 6, seed = 1, mask = null, fixedColors = null } = {}) {
   cols = Math.max(3, Math.min(10, cols | 0)); rows = Math.max(3, Math.min(10, rows | 0));
   let m = mask ? mask.slice() : fullMask(cols, rows);
   if (!m.some(Boolean)) m = fullMask(cols, rows);
@@ -92,7 +93,7 @@ export function makeLevel({ cols = 7, rows = 6, colorCount = 5, seed = 1, mask =
   for (let i = 0; i < m.length; i++) if (m[i]) cells.push(i);
   if (cells.length < 3) throw new Error('透明图形至少需要覆盖 3 个格子');
   const rng = mulberry32(seed >>> 0 || 1);
-  let palette = COLORS.slice(0, Math.max(2, Math.min(5, colorCount)));
+  let palette = COLORS.slice(0, Math.max(2, Math.min(6, colorCount)));
   let cols3;
   if (fixedColors && fixedColors.length === cells.length) {
     cols3 = fixedColors.slice();
@@ -116,16 +117,21 @@ export function makeLevel({ cols = 7, rows = 6, colorCount = 5, seed = 1, mask =
   return { cols, rows, mask: m, cells, nodes, nodeMap, planks, colors: palette, tally, seed, triples: nodes.length / 3, total: nodes.length };
 }
 
-// 固定的“参考关卡”：7×6 = 42 颗螺丝，五种颜色 9/9/9/9/6，和参考视频的密度与配色一致。
-export function referenceLevel(colorCount = 5) {
+// 固定的“参考关卡”：7×6 = 42 颗螺丝，默认六色（9/9/6/6/6/6，每种都是 3 的倍数），和参考视频的密度与配色一致。
+export function referenceLevel(colorCount = 6) {
   return makeLevel({ cols: 7, rows: 6, colorCount, seed: 20261018 });
 }
 
-export function randomLevel(seed, colorCount = 5, cols = 7, rows = 6) {
+// 参考视频第二幕：6 列 × 7 行，同样 42 颗螺丝，画面更窄更高。
+export function referenceAcidLevel(colorCount = 6) {
+  return makeLevel({ cols: 6, rows: 7, colorCount, seed: 20261019 });
+}
+
+export function randomLevel(seed, colorCount = 6, cols = 7, rows = 6) {
   return makeLevel({ cols, rows, colorCount, seed: seed >>> 0 });
 }
 
-export function imageLevel(imageData, { colorCount = 5, seed = 1, cols = 7, rows = 6, threshold = 0.5, cover = 0.5 } = {}) {
+export function imageLevel(imageData, { colorCount = 6, seed = 1, cols = 7, rows = 6, threshold = 0.5, cover = 0.5 } = {}) {
   const mask = maskFromAlpha(imageData, cols, rows, threshold, cover);
   if (mask.filter(Boolean).length < 3) throw new Error('透明图形覆盖的格子太少（至少 3 格）');
   return makeLevel({ cols, rows, colorCount, seed, mask });

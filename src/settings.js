@@ -2,21 +2,21 @@
 import { DEFAULT_HAND } from './default_hand.js';
 import { h5DeviceSelectOptions } from './h5/index.js';
 
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
 export const STORE_KEY = 'boulderRescueTool.settings';
 export const APP_ID = 'boulder-rescue-tool';
 
 // [key, 标签, 类型, 默认, min/max/step 或选项, ...] 类型: range/color/bool/select/text/file/button
 export const GROUPS = [
   ['关卡与棋盘', [
-    ['level', '关卡', 'select', 'reference', [['reference', '参考关卡（7×6 螺丝迷宫）'], ['random', '随机生成（保证可解）'], ['image', '导入透明图形生成']]],
+    ['level', '关卡', 'select', 'reference', [['reference', '参考关卡一 · 蓝石矿坑（7×6）'], ['reference_acid', '参考关卡二 · 酸池地牢（6×7）'], ['random', '随机生成（保证可解）'], ['image', '导入透明图形生成']]],
     ['seed', '随机种子', 'range', 1, 1, 9999, 1],
     ['cols', '列数', 'range', 7, 4, 8, 1],
     ['rows', '行数', 'range', 6, 3, 8, 1],
-    ['colorCount', '螺丝颜色数', 'range', 4, 3, 5, 1],
+    ['colorCount', '螺丝颜色数', 'range', 6, 3, 6, 1],
     ['traySlots', '托盘槽位', 'range', 3, 3, 5, 1],
-    ['timeLimit', '倒计时(秒)', 'range', 90, 30, 240, 5],
-    ['matchBonus', '三消加时(秒)', 'range', 3, 0, 15, 1],
+    ['timeLimit', '倒计时(秒)', 'range', 22, 10, 240, 1],
+    ['matchBonus', '三消加时(秒)', 'range', 0, 0, 15, 1],
     ['failOnJam', '托盘卡死即失败', 'bool', true],
     ['ruleNote', '规则：点击螺丝放进托盘，3 颗同色自动消除；托盘塞满异色即失败', 'note'],
     ['shapeImg', '上传透明 PNG/WebP（alpha 区域变成螺丝棋盘）', 'file', ''],
@@ -34,7 +34,7 @@ export const GROUPS = [
     ['hintShow', '闲置时高亮下一步螺丝', 'bool', true],
     ['hintDelay', '闲置多久出现提示(ms)', 'range', 6000, 1500, 20000, 500],
     ['captionShow', '顶部字幕', 'bool', true],
-    ['captionText', '字幕文字', 'text', '拆光螺丝 救出矿工'],
+    ['captionText', '字幕文字', 'text', '清华北大的也过不去'],
     ['captionY', '字幕 Y', 'range', 56, 20, 180, 1],
     ['discShow', '显示底部免责声明', 'bool', true],
     ['discText', '免责声明文字', 'text', '广告创意演示：实际玩法与奖励以游戏内为准'],
@@ -42,22 +42,23 @@ export const GROUPS = [
     ['discSize', '免责声明字号', 'range', 18, 10, 34, 1],
   ]],
   ['美术与场景', [
-    ['brickColor', '砖墙主色', 'color', '#5b3b3b'],
-    ['brickDark', '砖墙暗色', 'color', '#332125'],
-    ['rockColor', '巨石青色', 'color', '#2d6575'],
-    ['rockLight', '巨石亮色', 'color', '#61aab2'],
+    ['brickColor', '砖墙主色', 'color', '#6a4038'],
+    ['brickDark', '砖墙暗色', 'color', '#2e1c1e'],
+    ['rockColor', '蓝石主色', 'color', '#516f9e'],
+    ['rockLight', '蓝石亮色', 'color', '#8ab0d5'],
     ['acidColor', '酸液绿色', 'color', '#7ee33f'],
     ['woodColor', '木板亮色', 'color', '#b07f4a'],
     ['woodDark', '木板暗色', 'color', '#65401f'],
-    ['trayColor', '托盘粉色', 'color', '#d94f7d'],
+    ['trayColor', '托盘粉色', 'color', '#f49ab0'],
     ['metalColor', '金属高光', 'color', '#cfd3d8'],
     ['glowColor', '强调光色', 'color', '#ffd54a'],
     ['bgGrain', '背景噪点', 'range', 0.55, 0, 1, 0.01],
     ['vignette', '暗角强度', 'range', 0.55, 0, 1, 0.01],
     ['screwSize', '螺丝大小倍率', 'range', 1, 0.7, 1.35, 0.01],
-    ['plankW', '木板宽度(px)', 'range', 18, 12, 34, 1],
-    ['platformLift', '平台上升高度(px)', 'range', 100, 0, 200, 1],
-    ['showMiner', '显示矿工', 'bool', true],
+    ['plankW', '木板宽度(px)', 'range', 22, 12, 34, 1],
+    ['platformLift', '平台上升高度(px)', 'range', 0, 0, 200, 1],
+    ['sceneStyle', '随机/图形关场景', 'select', 'quarry', [['quarry', '蓝石矿坑'], ['acid', '酸池地牢']]],
+    ['showMiner', '显示被困角色', 'bool', true],
     ['rockFall', '消除时落石特效', 'bool', true],
   ]],
   ['音效', [
@@ -80,12 +81,13 @@ export const GROUPS = [
     ['thinkChance', '“思考停顿”概率', 'range', 0.12, 0, 0.6, 0.01],
     ['thinkMax', '思考停顿最长(ms)', 'range', 900, 0, 4000, 50],
     ['jitter', '落点随机抖动(px)', 'range', 10, 0, 40, 1],
-    ['handSize', '手指大小(画面宽比例)', 'range', 0.42, 0.1, 0.9, 0.01],
-    ['handAnchorX', '指尖锚点 X(0~1)', 'range', 0.22039473684210525, 0, 1, 0.005],
-    ['handAnchorY', '指尖锚点 Y(0~1)', 'range', 0.03667763157894737, 0, 1, 0.005],
-    ['handRotation', '手指旋转(度)', 'range', 6, -60, 60, 1],
+    ['handStyle', '手指样式', 'select', 'glove', [['glove', '参考视频白手套（默认）'], ['mahjong', '麻将工具同款手'], ['custom', '上传图片']]],
+    ['handSize', '手指大小(画面宽比例)', 'range', 0.44, 0.1, 0.9, 0.01],
+    ['handAnchorX', '指尖锚点 X(0~1)', 'range', 0.205, 0, 1, 0.005],
+    ['handAnchorY', '指尖锚点 Y(0~1)', 'range', 0.095, 0, 1, 0.005],
+    ['handRotation', '手指旋转(度)', 'range', 0, -60, 60, 1],
     ['handFlip', '手指水平翻转', 'bool', false],
-    ['handImage', '上传手指图片(透明PNG；默认=麻将工具同款手指)', 'file', DEFAULT_HAND],
+    ['handImage', '上传手指图片（“上传图片”样式使用）', 'file', DEFAULT_HAND],
     ['pressDepth', '按压幅度（按下时手指缩小比例）', 'range', 0.08, 0, 0.3, 0.01],
     ['pressEnabled', '点击按下效果', 'bool', true],
     ['tapRipple', '点击处显示波纹圈', 'bool', false],
@@ -136,9 +138,9 @@ export const GROUPS = [
     ['endCard', '显示结束页', 'bool', true],
     ['endCardHand', '结束页显示手指（自动通关点按钮）', 'bool', false],
     ['endDelay', '通关后出现延迟(ms)', 'range', 900, 0, 5000, 50],
-    ['endTitle', '标题', 'text', '拆光螺丝，逃出矿坑'],
-    ['endSub', '副标题', 'text', '三消同色螺丝 · 拯救被困矿工'],
-    ['ctaText', '按钮文字（编辑器内）', 'text', '立即游玩'],
+    ['endTitle', '橙色钩子文字', 'text', '无需下载'],
+    ['endSub', '白色行动文字', 'text', '点击即玩哦'],
+    ['ctaText', '按钮文字（试玩/H5 用）', 'text', '立即游玩'],
   ]],
 ];
 
@@ -155,6 +157,23 @@ export function migrate(obj) {
     const mv = (o, n) => { if (o in s) { if (!(n in s)) s[n] = s[o]; delete s[o]; } };
     mv('handImg', 'handImage'); mv('sfxVol', 'sfxVolume'); mv('endText', 'endTitle'); mv('gameTime', 'timeLimit');
     v = 1;
+  }
+  if (v < 2) {
+    // v1 的旧默认值一次性换成参考视频对齐后的默认；用户改过的值保留。
+    if (s.colorCount === 4) s.colorCount = 6;
+    if (s.timeLimit === 90) s.timeLimit = 22;
+    if (s.matchBonus === 3) s.matchBonus = 0;
+    if (s.captionText === '拆光螺丝 救出矿工') s.captionText = '清华北大的也过不去';
+    if (s.endTitle === '拆光螺丝，逃出矿坑') s.endTitle = '无需下载';
+    if (s.endSub === '三消同色螺丝 · 拯救被困矿工') s.endSub = '点击即玩哦';
+    if (s.plankW === 18) s.plankW = 22;
+    if (s.handSize === 0.42) s.handSize = 0.44;
+    if (s.handRotation === 6) s.handRotation = 0;
+    if (s.handAnchorX === 0.22039473684210525) s.handAnchorX = 0.205;
+    if (s.handAnchorY === 0.03667763157894737) s.handAnchorY = 0.095;
+    if (!s.handStyle) s.handStyle = 'glove';
+    if (!s.sceneStyle) s.sceneStyle = 'quarry';
+    v = 2;
   }
   const out = { ...DEFS };
   for (const k in DEFS) {

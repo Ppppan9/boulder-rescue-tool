@@ -5,10 +5,11 @@ import {
   GROUPS, DEFS, loadSettings, saveSettings, exportJSON, migrate, APP_ID, STORE_KEY,
 } from './settings.js';
 import {
-  referenceLevel, makeLevel, imageLevel, initState, pick, solvePlan, hintNode,
+  referenceLevel, referenceAcidLevel, makeLevel, imageLevel, initState, pick, solvePlan, hintNode,
 } from './level.js';
 import {
   DW, DH, LAYOUT, buildAssets, handAsset, drawItems, makeSprite, boardGeom, trayGeom, heroGeom,
+  sceneSpec, sceneKey, gloveAsset, setEndCatImage,
 } from './render.js';
 import { Sfx } from './audio.js';
 import { createAERecorder } from './ae/recorder.js';
@@ -19,6 +20,7 @@ import {
   applyH5DevicePresetToSettings, markH5DeviceCustomIfSizeEdited,
 } from './h5/index.js';
 import { DEFAULT_HAND } from './default_hand.js';
+import ENDCAT_SRC from './endcat.jpg';
 
 const $ = id => document.getElementById(id);
 const canvas = $('stage');
@@ -45,6 +47,7 @@ let ui = null;
 let gameSerial = 0;
 
 let trayNodes = []; // [{i,color}]，与 st.tray 同步
+let lastTrayColor = null;
 const screwCur = new Map(); // i -> {x,y,scale}
 const flights = new Map();  // i -> {t0,dur,fromX,fromY,toX,toY,spin,landed}
 const pendingVanish = new Map(); // i -> {at,dur}
@@ -129,6 +132,7 @@ async function chooseLevel() {
       threshold: S.shapeThreshold, cover: S.shapeCover,
     });
   }
+  if (S.level === 'reference_acid') return referenceAcidLevel(S.colorCount);
   return referenceLevel(S.colorCount);
 }
 
@@ -166,16 +170,25 @@ async function rebuildAssetsOnly() {
 async function rebuildHand() {
   handImgEl = null; hand = null;
   if (A) delete A.hand;
-  if (!S.handImage || playable) { if (ui) ui.setPreview(null, S); return; }
+  if (playable) { if (ui) ui.setPreview(null, S); return; }
+  const style = S.handStyle || 'glove';
   try {
-    handImgEl = await loadImg(S.handImage);
+    if (style === 'glove') {
+      hand = gloveAsset(S);
+      if (hand) A.hand = hand;
+      if (ui) ui.setPreview(hand && hand.c, S);
+      return;
+    }
+    const src = style === 'mahjong' ? DEFAULT_HAND : (S.handImage || '');
+    if (!src) { hand = gloveAsset(S); if (hand) A.hand = hand; if (ui) ui.setPreview(hand && hand.c, S); return; }
+    handImgEl = await loadImg(src);
     hand = handAsset(handImgEl, S);
-    // 手指既是独立精灵，也是 AE/3D 导出的固定图层素材
     if (hand) A.hand = hand;
     if (ui) ui.setPreview(handImgEl, S);
   } catch (e) {
     handImgEl = null; hand = null;
     if (A) delete A.hand;
+    if (ui) ui.setPreview(null, S);
     status('手指图片加载失败：' + e.message);
   }
 }
@@ -183,8 +196,10 @@ async function rebuildHand() {
 function resetGame() {
   stopAuto();
   gameSerial++;
-  st = initState(L, { timeLimit: S.timeLimit, traySlots: S.traySlots });
+  const sc = sceneSpec(S);
+  st = initState(L, { timeLimit: sc.noTimer ? 1e9 : S.timeLimit, traySlots: S.traySlots });
   trayNodes = [];
+  lastTrayColor = null;
   screwCur.clear(); flights.clear(); pendingVanish.clear(); vanishing.clear(); plankAnims.clear();
   fx.length = 0; matchFx.length = 0; bonusFx.length = 0;
   phase = 'play'; endShown = false; seq.winAt = 0; seq.failAt = 0; seq.endAt = 0; seq.done = false;
@@ -366,24 +381,21 @@ function addPlankItems(arr, now) {
 }
 
 function addTimer(arr, now) {
+  if (sceneSpec(S).noTimer || !st.started) return;
   const frac = clamp(st.timeLeft / Math.max(1, S.timeLimit), 0, 1);
   const color = frac > .5 ? 'g' : frac > .2 ? 'y' : 'r';
   const urgent = frac <= .2 && phase === 'play';
-  const pulse = urgent ? 1 + Math.sin(now / 120) * .035 : 1;
+  const pulse = urgent ? 1 + Math.sin(now / 120) * .04 : 1;
   spr(arr, 'timer_ring', 'timer_ring_' + color, LAYOUT.timer.x, LAYOUT.timer.y, 82, { sx: pulse, sy: pulse });
-  const ang = -Math.PI / 2 + (1 - frac) * Math.PI * 2;
-  spr(arr, 'timer_marker', 'timer_marker', LAYOUT.timer.x + Math.cos(ang) * 44, LAYOUT.timer.y + Math.sin(ang) * 44, 83, {
-    sx: urgent ? 1.2 : 1, sy: urgent ? 1.2 : 1,
-  });
   const text = String(Math.max(0, Math.ceil(st.timeLeft)));
-  const w = text.length * 30;
+  const w = text.length * 23;
   for (let k = 0; k < text.length; k++) {
-    spr(arr, 'timer_digit_' + k, 'digit_' + text[k], LAYOUT.timer.x - w / 2 + 17 + k * 30, LAYOUT.timer.y + 4, 84, { sx: .82, sy: .82 });
+    spr(arr, 'timer_digit_' + k, (color === 'r' ? 'digit_w_' : 'digit_') + text[k], LAYOUT.timer.x - w / 2 + 12 + k * 23, LAYOUT.timer.y + 2, 84, { sx: .92, sy: .92 });
   }
 }
 
 function addHud(arr, now) {
-  if (A.caption) spr(arr, 'caption', 'caption', 322, S.captionY, 86);
+  if (A.caption) spr(arr, 'caption', 'caption', 360, S.captionY, 86);
   if (A.disclaimer && !endShown) {
     const a = A.disclaimer;
     spr(arr, 'disclaimer', 'disclaimer', 360, DH - S.discY - a.h / 2, 90);
@@ -425,13 +437,16 @@ function addParticles(arr, now) { addFxItems(arr, now); }
 
 function sceneGameplay(now) {
   const arr = [];
+  const sp = sceneSpec(S);
   spr(arr, 'background', 'background', 360, 640, 0);
-  if (A.acid) spr(arr, 'acid', 'acid', 122, 1278, 2, { sy: .62 });
-  for (let i = 0; i < 5; i++) {
-    const period = 4300 + i * 760, t = ((now + i * 1400) % period) / period;
-    const x = 30 + ((i * 53) % 180) + Math.sin(now / 900 + i) * 7;
-    const y = 1250 - t * 345;
-    if (y > 900) spr(arr, 'bubble_' + i, 'bubble', x, y, 3, { op: .25 + .5 * (1 - t), sx: .7 + t * .6, sy: .7 + t * .6 });
+  if (sp.hasAcid && A.acid) {
+    spr(arr, 'acid', 'acid', LAYOUT.acid.x, 1278, 2, { sx: .86, sy: .46 });
+    for (let i = 0; i < 5; i++) {
+      const period = 4300 + i * 760, t = ((now + i * 1400) % period) / period;
+      const x = 30 + ((i * 53) % 180) + Math.sin(now / 900 + i) * 7;
+      const y = 1250 - t * 345;
+      if (y > 900 && A['bubble_' + i]) spr(arr, 'bubble_' + i, 'bubble', x, y, 3, { op: .25 + .5 * (1 - t), sx: .7 + t * .6, sy: .7 + t * .6 });
+    }
   }
   spr(arr, 'board', 'board', LAYOUT.board.left + LAYOUT.board.w / 2, LAYOUT.board.top + LAYOUT.board.h / 2, 30);
 
@@ -441,24 +456,19 @@ function sceneGameplay(now) {
   const hg = heroGeom(lift);
   const shake = phase === 'fail' ? Math.sin(now / 26) * 5 * (1 - clamp((now - seq.failAt) / 700, 0, 1)) : 0;
 
-  // 悬石、绞盘、配重
-  let slabY = LAYOUT.slab.y + Math.sin(now / 900) * 3;
-  let slabRot = Math.sin(now / 1200) * .014;
-  if (phase === 'fail') { const t = easeOutCubic(clamp((now - seq.failAt) / Math.max(1, S.failDur), 0, 1)); slabY += t * 160; slabRot += t * .08; }
-  if (phase === 'win') { const t = easeInOutCubic(clamp((now - seq.winAt) / Math.max(1, S.winDur), 0, 1)); slabY -= t * 64; slabRot -= t * .045; }
-  if (A.slab) spr(arr, 'slab', 'slab', LAYOUT.slab.x + shake * .3, slabY, 22, { rot: slabRot });
-  if (A.pulley) spr(arr, 'pulley', 'pulley', LAYOUT.pulley.x, LAYOUT.pulley.y, 24, { rot: Math.sin(now / 1400) * .025 });
-  const weightY = LAYOUT.weight.y + progress * 74 + Math.sin(now / 1100) * 3;
-  if (A.weight) spr(arr, 'weight', 'weight', LAYOUT.weight.x, weightY, 23, { rot: Math.sin(now / 1300) * .03 });
-  ropeSeg(arr, 'rope_weight', LAYOUT.pulley.x - 10, LAYOUT.pulley.y + 20, LAYOUT.weight.x, weightY - 82, 23, .9);
-  ropeSeg(arr, 'rope_hand', hg.handR.x + 4, hg.handR.y - 4, LAYOUT.pulley.x + 26, LAYOUT.pulley.y + 8, 25, 1);
-  ropeSeg(arr, 'rope_grip', hg.handL.x + 8, hg.handL.y + 2, hg.handR.x - 2, hg.handR.y - 8, 25.5, .72);
+  if (sp.hasRope) {
+    if (A.pulley) spr(arr, 'pulley', 'pulley', LAYOUT.pulley.x, LAYOUT.pulley.y, 24, { rot: Math.sin(now / 1400) * .025 });
+    const weightY = LAYOUT.weight.y + progress * 74 + Math.sin(now / 1100) * 3;
+    if (A.weight) spr(arr, 'weight', 'weight', LAYOUT.weight.x, weightY, 23, { rot: Math.sin(now / 1300) * .03 });
+    ropeSeg(arr, 'rope_weight', LAYOUT.pulley.x - 10, LAYOUT.pulley.y + 20, LAYOUT.weight.x, weightY - 82, 23, .9);
+    ropeSeg(arr, 'rope_hand', hg.handR.x + 4, hg.handR.y - 4, LAYOUT.pulley.x + 26, LAYOUT.pulley.y + 8, 25, 1);
+    ropeSeg(arr, 'rope_grip', hg.handL.x + 8, hg.handL.y + 2, hg.handR.x - 2, hg.handR.y - 8, 25.5, .72);
+  }
 
-  // 平台与矿工
   const platformY = LAYOUT.platform.y - lift;
   if (A.platform) spr(arr, 'platform', 'platform', LAYOUT.platform.x, platformY, 26);
   if (S.showMiner) {
-    spr(arr, 'hero_shadow', 'hero_shadow', hg.x + 2, hg.foot + 3, 37, { sx: .74, sy: .7 });
+    spr(arr, 'hero_shadow', 'hero_shadow', hg.x + 2, hg.foot + 3, 37, { sx: .72, sy: .66 });
     const scared = phase === 'play';
     const win = phase === 'win';
     const fail = phase === 'fail';
@@ -466,20 +476,30 @@ function sceneGameplay(now) {
     const legRot = scared ? Math.sin(now / 320) * .045 : fail ? .24 : WinLeg(now);
     spr(arr, 'hero_leg_l', 'hero_leg_l', hg.legL.x, hg.legL.y, 38, { rot: -legRot, sx: .92, sy: .92 });
     spr(arr, 'hero_leg_r', 'hero_leg_r', hg.legR.x, hg.legR.y, 39, { rot: legRot * 1.15, sx: .92, sy: .92 });
-    spr(arr, 'hero_body', 'hero_body', hg.body.x, hg.body.y + bob, 40, { rot: fail ? .16 : Math.sin(now / 700) * .012, sx: .94, sy: .94 });
-    // 两手都握住绳子：前臂略低、后臂略高，形成向后使劲的姿势
-    const armBase = scared ? -0.48 : win ? 1.02 : -0.2;
-    spr(arr, 'hero_arm_l', 'hero_arm_l', hg.shoulderL.x, hg.shoulderL.y + bob, 41, { rot: armBase - .12 + Math.sin(now / 480) * .025, sx: .93, sy: .93 });
-    spr(arr, 'hero_arm_r', 'hero_arm_r', hg.shoulderR.x, hg.shoulderR.y + bob, 42, { rot: (win ? 1.18 : armBase + .08) + Math.sin(now / 520 + 1) * .03, sx: .93, sy: .93 });
+    const bodyAsset = sp.hasRope ? 'hero_body' : 'hero_body_plain';
+    spr(arr, 'hero_body', bodyAsset, hg.body.x, hg.body.y + bob, 40, { rot: fail ? .16 : Math.sin(now / 700) * .012, sx: .94, sy: .94 });
+    // 第一幕双手护脸；第二幕双手抓绳
+    if (sp.hasRope) {
+      const base = scared ? -0.48 : win ? 1.02 : -0.2;
+      const armL = base - .12 + Math.sin(now / 480) * .025;
+      const armR = (win ? 1.18 : base + .08) + Math.sin(now / 520 + 1) * .03;
+      spr(arr, 'hero_arm_l', 'hero_arm_l', hg.shoulderL.x, hg.shoulderL.y + bob, 41, { rot: armL, sx: .93, sy: .93 });
+      spr(arr, 'hero_arm_r', 'hero_arm_r', hg.shoulderR.x, hg.shoulderR.y + bob, 42, { rot: armR, sx: .93, sy: .93 });
+    } else {
+      // 第一幕：双手护脸，手肘自然下垂
+      spr(arr, 'hero_arm_l', 'hero_arm_scared_l', hg.shoulderL.x + 2, hg.shoulderL.y + 12 + bob, 41, { sx: .9, sy: .9, rot: Math.sin(now / 420) * .03 });
+      spr(arr, 'hero_arm_r', 'hero_arm_scared_r', hg.shoulderR.x - 2, hg.shoulderR.y + 12 + bob, 42, { sx: .9, sy: .9, rot: Math.sin(now / 460 + 1) * .03 });
+    }
     const headAsset = win ? 'hero_head_happy' : fail ? 'hero_head_dizzy' : 'hero_head';
     spr(arr, 'hero_head', headAsset, hg.headPos.x + shake * .16, hg.headPos.y + bob * .7, 43, { rot: (fail ? .22 : Math.sin(now / 760) * .026) + shake * .001, sx: .95, sy: .95 });
   }
 
-  // 托盘底座 + 托盘
-  if (A.tray_mount) spr(arr, 'tray_mount', 'tray_mount', 520, 522, 45.5);
-  if (A.tray) {
+  // 托盘底座 + 托盘（参考视频会随当前收集色泛光）
+  if (A.tray_mount) spr(arr, 'tray_mount', 'tray_mount', LAYOUT.tray.x, LAYOUT.tray.y, 45.5);
+  const trayAsset = lastTrayColor ? ('tray_' + lastTrayColor) : 'tray';
+  if (A[trayAsset] || A.tray) {
     const shakeX = matchFx.length ? Math.sin(now / 22) * 3 * Math.max(0, 1 - (now - matchFx[matchFx.length - 1].t0) / 380) : 0;
-    spr(arr, 'tray', 'tray', LAYOUT.tray.x + shakeX, LAYOUT.tray.y, 46);
+    spr(arr, 'tray', A[trayAsset] ? trayAsset : 'tray', LAYOUT.tray.x + shakeX, LAYOUT.tray.y, 46);
   }
 
   addPlankItems(arr, now);
@@ -496,8 +516,16 @@ function sceneGameplay(now) {
   addTimer(arr, now);
 
   if (phase === 'fail') {
-    const t = clamp((now - seq.failAt) / 700, 0, 1);
+    const since = now - seq.failAt;
+    const t = clamp(since / 700, 0, 1);
     if (A.flash_fail && t < 1) spr(arr, 'flash_fail', 'flash_fail', 360, 640, 250, { op: (1 - t) * .9 });
+    // 参考视频的粉色 FAIL 徽章
+    const bt = clamp((since - 180) / 240, 0, 1);
+    if (bt > 0 && A.fail_badge) {
+      const e = bt < .5 ? 4 * bt * bt * bt : 1 - Math.pow(-2 * bt + 2, 3) / 2;
+      const sc = .62 + .38 * e;
+      spr(arr, 'fail_badge', 'fail_badge', 360, 620, 252, { sx: sc, sy: sc, op: e });
+    }
   }
   if (phase === 'win') {
     const t = clamp((now - seq.winAt) / 600, 0, 1);
@@ -512,14 +540,9 @@ function sceneEnd(now) {
   const arr = [];
   spr(arr, 'background', 'background', 360, 640, 0);
   const fail = !!st.lost;
-  spr(arr, 'end_card', fail ? 'end_card_fail' : 'end_card_win', 360, 640, 200);
   const since = now - endShownAt;
-  const glow = 1 + Math.sin(since / 900) * .06;
-  spr(arr, 'end_glow', 'end_glow', 360, 640, 201, { sx: .82 * glow, sy: .82 * glow, op: .65 });
-  const hop = Math.abs(Math.sin(since / 620)) * 9;
-  spr(arr, 'end_hero', 'end_hero', 360, 690 - hop, 202, { sx: 1.05, sy: 1.05, rot: Math.sin(since / 900) * .012 });
-  const pulse = 1 + Math.sin(since / 280) * .028;
-  spr(arr, 'end_cta', 'end_cta', 360, 802, 203, { sx: pulse, sy: pulse });
+  const pop = 1 + Math.max(0, Math.sin(since / 700)) * .012;
+  spr(arr, 'end_card', fail ? 'end_card_fail' : 'end_card_win', 360, 640, 200, { sx: pop, sy: pop });
   addHand(arr, now);
   return arr;
 }
@@ -532,6 +555,7 @@ function buildScene(now) {
 // ---------- 游戏动作 ----------
 function syncTrayAfterPick(result, nodeId, now) {
   trayNodes.push({ i: nodeId, color: result.color });
+  lastTrayColor = result.color;
   const T = trayGeom(S);
   const slot = Math.max(0, Math.min(T.slots.length - 1, result.slot));
   const to = slotPos(slot);
@@ -561,7 +585,7 @@ function syncTrayAfterPick(result, nodeId, now) {
       if (flights.has(id) && id !== nodeId) flights.delete(id);
     }
     matchFx.push({ id: 'match_' + (++fxSerial), t0: now + S.takeoffDur * .5, dur: S.tripleDur, x: LAYOUT.tray.x, y: LAYOUT.tray.y });
-    bonusFx.push({ id: 'bonus_' + (++fxSerial), t0: now + S.takeoffDur * .55, dur: 900, x: LAYOUT.timer.x - 10, y: LAYOUT.timer.y + 76 });
+    if (S.matchBonus > 0) bonusFx.push({ id: 'bonus_' + (++fxSerial), t0: now + S.takeoffDur * .55, dur: 900, x: LAYOUT.timer.x, y: LAYOUT.timer.y + 68 });
     setTimeout(() => { if (phase === 'play' || phase === 'win') sfx.play('match', S); }, S.takeoffDur * .45);
     for (let k = 0; k < 10; k++) addFx(k % 2 ? 'spark' : 'spark_white', LAYOUT.tray.x + rand(-60, 60), LAYOUT.tray.y + rand(-18, 18), 54, now + S.takeoffDur * .5, rand(380, 700), { vx: rand(-210, 210), vy: rand(-230, -20), gravity: 460, s0: rand(.5, 1.1), s1: 0 });
   }
@@ -739,7 +763,10 @@ function nodeAt(x, y) {
   }
   return best;
 }
-function inCta(x, y) { return x > 100 && x < 620 && y > 735 && y < 870; }
+function inCta(x, y) {
+  if (endShown) return true;
+  return x > 100 && x < 620 && y > 735 && y < 870;
+}
 
 canvas.addEventListener('pointerenter', ev => {
   pointer.inside = true;
@@ -916,8 +943,8 @@ async function exportH5() {
 
 // ---------- 设置面板 ----------
 const LEVEL_KEYS = new Set(['level', 'seed', 'cols', 'rows', 'colorCount', 'traySlots', 'shapeImg', 'shapeThreshold', 'shapeCover', 'shapeSeed']);
-const ART_KEYS = new Set(['brickColor', 'brickDark', 'rockColor', 'rockLight', 'acidColor', 'woodColor', 'woodDark', 'trayColor', 'metalColor', 'glowColor', 'bgGrain', 'vignette', 'screwSize', 'plankW', 'platformLift', 'showMiner', 'rockFall', 'captionShow', 'captionText', 'captionY', 'discShow', 'discText', 'discY', 'discSize', 'endTitle', 'endSub', 'ctaText']);
-const HAND_KEYS = new Set(['handImage', 'handSize', 'handAnchorX', 'handAnchorY', 'handRotation', 'handFlip', 'pressDepth']);
+const ART_KEYS = new Set(['brickColor', 'brickDark', 'rockColor', 'rockLight', 'acidColor', 'woodColor', 'woodDark', 'trayColor', 'metalColor', 'glowColor', 'bgGrain', 'vignette', 'screwSize', 'plankW', 'platformLift', 'sceneStyle', 'showMiner', 'rockFall', 'captionShow', 'captionText', 'captionY', 'discShow', 'discText', 'discY', 'discSize', 'endTitle', 'endSub', 'ctaText']);
+const HAND_KEYS = new Set(['handImage', 'handStyle', 'handSize', 'handAnchorX', 'handAnchorY', 'handRotation', 'handFlip', 'pressDepth']);
 
 let artDebounce = 0;
 function onChange(key, value, type) {
@@ -932,6 +959,12 @@ function onChange(key, value, type) {
     try { window.__h5EditorDeviceFit && window.__h5EditorDeviceFit(); } catch (e) {}
   }
   if (key === 'timeLimit' && st && !st.started) st.timeLeft = S.timeLimit;
+  if (key === 'handStyle') {
+    // 切换素材时同步该素材的默认锚点，避免白手套/实拍手指错位
+    if (value === 'glove') { S.handSize = .44; S.handAnchorX = .205; S.handAnchorY = .095; S.handRotation = 0; }
+    else if (value === 'mahjong') { S.handSize = .42; S.handAnchorX = .22039473684210525; S.handAnchorY = .03667763157894737; S.handRotation = 6; }
+    if (ui) ui.sync();
+  }
   if (key === 'shapeImg') S.level = 'image';
   scheduleSave();
   if (LEVEL_KEYS.has(key)) {
@@ -1084,7 +1117,16 @@ function render(now) {
   items.sort((a, b) => a.z - b.z);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, DW, DH);
-  drawItems(ctx, items, 1);
+  if (phase === 'fail' && !endShown) {
+    // 参考视频失败时：场景高斯模糊，字幕/免责声明与 FAIL 徽章保持清晰
+    const sharp = i => i.id === 'fail_badge' || i.id === 'caption' || i.id === 'disclaimer';
+    ctx.filter = 'blur(7px)';
+    drawItems(ctx, items.filter(i => !sharp(i)), 1);
+    ctx.filter = 'none';
+    drawItems(ctx, items.filter(sharp), 1);
+  } else {
+    drawItems(ctx, items, 1);
+  }
 }
 
 let rafId = 0;
@@ -1109,11 +1151,12 @@ function makePanel() {
   refreshAutoButton(); refreshRecButton(); refreshAEButton();
 }
 async function boot() {
+  try { setEndCatImage(await loadImg(ENDCAT_SRC)); } catch (e) { console.warn('结束卡图片加载失败，使用内置黑猫', e); }
   makePanel();
   bindTopButtons();
   bindEditorDevicePreview(() => S);
   await rebuildAll();
-  status('就绪 · 拆光螺丝救出矿工');
+  status('就绪 · 拆光螺丝救出被困者');
   refreshAutoButton(); refreshRecButton(); refreshAEButton();
   if (ui && handImgEl) ui.setPreview(handImgEl, S);
   // H5 试玩壳：合并烘焙设置、自动适配舞台、可选自动演示

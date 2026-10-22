@@ -56,7 +56,7 @@ try {
   stage('手动点击 + 手指跟随');
   const box = await page.locator('#stage').boundingBox();
   const toCss = (x, y) => ({ x: box.x + x / 720 * box.width, y: box.y + y / 1280 * box.height });
-  const p0 = toCss(280, 630); // 参考关卡 (0,0) 节点
+  const p0 = toCss(58, 744); // 参考关卡第一幕 (0,0) 节点
   await page.mouse.move(p0.x, p0.y);
   await page.waitForTimeout(180);
   eq(await page.locator('#stage').evaluate(el => getComputedStyle(el).cursor), 'none', '手指出现时隐藏鼠标光标');

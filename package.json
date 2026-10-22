@@ -1,9 +1,9 @@
 {
   "name": "boulder-rescue-tool",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "巨石营救核玩工具：拆螺丝救出矿工，离线单文件、AE/3D/H5 导出",
+  "description": "巨石营救核玩工具：拆螺丝救出被困者，离线单文件、AE/3D/H5 导出",
   "scripts": {
     "build": "node build.mjs",
     "test:logic": "node test/logic-test.mjs",
